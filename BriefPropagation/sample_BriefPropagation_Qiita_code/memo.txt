@@ -1,0 +1,3 @@
+Qiita 
+「確率伝播法を組んでみる(Python)」のソースコード
+https://qiita.com/clientver2/items/06b87aca1ac72bae3ea1
