@@ -5,50 +5,6 @@ import matplotlib.pyplot as plt
 from src.BriefPropagation.func_BriefPropagation import *
 
 ############################
-# edge create
-# 引数
-# image_origin = cv2.imread("./image_folder/Lena_8bit_16x16.jpg", 0)  # 256, 64, 32, 16
-# height, width = image_origin.shape  # height:y方向, width：x方向
-#
-# n_grad = 4
-# # pair_id = np.array([1, 2])
-# # # edge = Edge(pair_id, n_grad)
-# #
-# # dict_test = {}
-# # dict_test[pair_id] = "aaa"
-# # test = 1
-#
-# list_edge = []
-#
-# # (height-1)*(width-1)の範囲のedgeの登録
-# for y in range(height - 1):
-#     for x in range(width - 1):
-#         id = y * width + x
-#         pair_id_1 = np.array([id, id + 1], dtype='int32')  # 右のノードとのedge
-#         pair_id_2 = np.array([id, id + width], dtype='int32')  # 下のノードとのedge
-#         edge_1 = Edge(pair_id_1, n_grad)  # edgeインスタンスの作成
-#         edge_2 = Edge(pair_id_2, n_grad)  # edgeインスタンスの作成
-#
-#         list_edge.append(edge_1)
-#         list_edge.append(edge_2)
-#
-# # 一番下の行の登録
-# for x in range(width-1):
-#     id = width * (height - 1) + x
-#     pair_id = np.array([id, id + 1], dtype='int32')  # 右のノードとのedge
-#     edge = Edge(pair_id, n_grad)  # edgeインスタンスの作成
-#
-#     list_edge.append(edge)
-#
-# # 一番右の列の登録
-# for y in range(height-1):
-#     id = height * (width - 1) + y
-#     pair_id = np.array([id, id + width], dtype='int32')  # 下のノードとのedge
-#     edge = Edge(pair_id, n_grad)  # edgeインスタンスの作成
-#
-#     list_edge.append(edge)
-#
-# test = 1
 ############################
 
 
@@ -75,13 +31,13 @@ image_noise, noise_mat = noise_add_sym(n_grad, q_error, image_in)
 # MRF networkの作成
 network = generate_mrf_network(height, width, n_grad)
 
-# 尤度の計算
-# 各ノードの観測確率モデル(尤度 p(g_i|f_i) g_i:観測, f_i:潜在変数)を計算
-for y in range(height):
-    for x in range(width):
-        node_id = width * y + x
-        node = network.nodes[node_id]  # ノードの取り出し
-        node.calc_likelihood(beta, q_error, image_noise[y, x], option_likelihood)  # K次元対称通信路の尤度計算
+# # 尤度の計算
+# # 各ノードの観測確率モデル(尤度 p(g_i|f_i) g_i:観測, f_i:潜在変数)を計算
+# for y in range(height):
+#     for x in range(width):
+#         node_id = width * y + x
+#         node = network.nodes[node_id]  # ノードの取り出し
+#         node.calc_likelihood(beta, q_error, image_noise[y, x], option_likelihood)  # K次元対称通信路の尤度計算
 
 ###########################
 # # debug
@@ -93,7 +49,9 @@ for y in range(height):
 ###########################
 
 # BP実行
-network.belief_propagation(N_itr, alpha)
+# network.belief_propagation(N_itr, alpha)
+network.belief_propagation(N_itr, alpha, beta, q_error, image_noise, option_likelihood)
+
 
 # 周辺分布から画像化
 image_out = np.zeros((width, height), dtype='uint8')  # 出力画像

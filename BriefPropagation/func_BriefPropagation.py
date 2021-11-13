@@ -25,7 +25,7 @@ class MRF:
     """
 
     # 確率伝搬BPを実行
-    def belief_propagation(self, N_itr, alpha):
+    def belief_propagation(self, N_itr, alpha, beta, q_error, image_noise, option_likelihood):
         """
         確率伝搬BPを実行 (動機スケジューリング)
         :param N_itr: BPイタレーション
@@ -33,9 +33,23 @@ class MRF:
         :return: メッセージの更新を行い、各ノードインスタンスにメッセージと周辺事後分布
         """
 
+        # 画像情報取得
+        height = image_noise.shape[0]
+        width = image_noise.shape[1]
+
         # 各ノードのメッセージ初期化
         for node in self.nodes.values():
             node.initialize_message()
+
+        # ### EM loop start ### #
+
+        # 尤度の計算
+        # 各ノードの観測確率モデル(尤度 p(g_i|f_i) g_i:観測, f_i:潜在変数)を計算
+        for y in range(height):
+            for x in range(width):
+                node_id = width * y + x
+                node = self.nodes[node_id]  # ノードの取り出し
+                node.calc_likelihood(beta, q_error, image_noise[y, x], option_likelihood)
 
         # BPイタレーション開始
         for itr in range(N_itr):
@@ -52,11 +66,17 @@ class MRF:
             node.calc_post_marginal()
 
         # ノード間の結合事後分布を計算 p(f_i,f_j|g_all)
-        # def
-        self.calc_post_joint()
+        self.calc_post_joint(alpha)
+
+        # # パラメータの更新
+        # qの推定
+        # betaの推定
+        # alphaの推定
+
+        test = 1
 
     # 結合事後分布 p(f_i,f_j|f_all) の計算
-    def calc_post_joint(self):
+    def calc_post_joint(self, alpha):
 
         for edge in self.edges:  # すべてのedgeに対して結合分布を計算
             # edgeに接続されたnodeを取得
@@ -78,13 +98,17 @@ class MRF:
                     message_product_2 *= node_2.receive_message[neigbor_node]
 
             # 潜在変数間の結合関数を取得
+            F_12 = gaussian_inter_latent_function(alpha, self.n_grad)
 
             # メッセージの積から結合事後分布を計算
+            for k in range(self.n_grad):
+                F_12[k, :] *= message_product_1  # 行ベクトルにnode_1近傍のメッセージ積を掛ける
+                F_12[:, k] *= message_product_2  # 列ベクトルにnode_2近傍のメッセージ積を掛ける
+
+            post_joint_prob = 1 / np.sum(F_12) * F_12  # 正規化して結合事後分布を計算
 
             # 結合事後分布をegdeに保存
-
-            test = 1
-
+            edge.post_joint_prob = post_joint_prob
 
 
 # Node作成
@@ -247,7 +271,7 @@ def generate_mrf_network(height, width, n_grad):
 
     # 一番右の列の登録
     for y in range(height - 1):
-        id = height * (width - 1) + y
+        id = width * y + width - 1
         pair_id = np.array([id, id + width], dtype='int32')  # 下のノードとのedge
         edge = Edge(pair_id, n_grad)  # edgeインスタンスの作成
         network.edges.append(edge)  # edgeインスタンスをMRFインスタンスに保存
