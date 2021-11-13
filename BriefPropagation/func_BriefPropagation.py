@@ -1,10 +1,19 @@
 import numpy as np
 
 
+class Edge:
+    def __init__(self, pair_id, n_grad):
+        self.pair_id = pair_id  # edgeが接続するノードのペアのid サイズ2のndarray
+        self.n_grad = n_grad  # 階調数
+        self.post_joint_prob = np.zeros((n_grad, n_grad), dtype='float64')  # 結合事後分布 p(f_i,f_j|f_all)
+
+
 # MRF作成 (ノードの集合を保存)
 class MRF:
-    def __init__(self):
+    def __init__(self, n_grad):
         self.nodes = {}  # MRF上のノード (key:id, value:node)
+        self.edges = []  # MRF上のエッジの集合
+        self.n_grad = n_grad  # 階調数
 
     """
     #### memo ####
@@ -38,9 +47,44 @@ class MRF:
                     # nodeからneighbor_targetへの送信メッセージをneighborの受信メッセージとして保存
                     neighbor_target.receive_message[node] = node.send_message(neighbor_target, alpha)
 
-        # 各ノードの周辺分布を計算
+        # 各ノードの周辺事後分布を計算 p(f_i|g_all)
         for node in self.nodes.values():
             node.calc_post_marginal()
+
+        # ノード間の結合事後分布を計算 p(f_i,f_j|g_all)
+        # def
+        self.calc_post_joint()
+
+    # 結合事後分布 p(f_i,f_j|f_all) の計算
+    def calc_post_joint(self):
+
+        for edge in self.edges:  # すべてのedgeに対して結合分布を計算
+            # edgeに接続されたnodeを取得
+            id_1 = edge.pair_id[0]
+            id_2 = edge.pair_id[1]
+            node_1 = self.nodes[id_1]
+            node_2 = self.nodes[id_2]
+
+            # node_1について node_2以外からのメッセージの積を計算
+            message_product_1 = np.ones(self.n_grad, dtype='float64')  # node_1の近傍からのメッセージの積(node_2からのメッセージは除く)
+            for neigbor_node in node_1.receive_message.keys():
+                if neigbor_node.id != id_2:  # 隣接ノードがnode_2ではないとき
+                    message_product_1 *= node_1.receive_message[neigbor_node]
+
+            # node_2について node_1以外からのメッセージの積を計算
+            message_product_2 = np.ones(self.n_grad, dtype='float64')  # node_2の近傍からのメッセージの積(node_1からのメッセージは除く)
+            for neigbor_node in node_2.receive_message.keys():
+                if neigbor_node.id != id_1:  # 隣接ノードがnode_1ではないとき
+                    message_product_2 *= node_2.receive_message[neigbor_node]
+
+            # 潜在変数間の結合関数を取得
+
+            # メッセージの積から結合事後分布を計算
+
+            # 結合事後分布をegdeに保存
+
+            test = 1
+
 
 
 # Node作成
@@ -144,17 +188,19 @@ class Node:
 
 
 # MRF作成
-def generate_mrf_Network(height, width, n_grad):
+def generate_mrf_network(height, width, n_grad):
     """
-    # MRF networkを作成
+    # MRF networkを作成 (ノードとエッジを登録)
     :param height: 画像の高さ
     :param width: 画像の幅
     :param n_grad: 画素の階調数
     :return: network: すべてのノードを含んだネットワーク全体のインスタンス
     """
     # MRF network 作成
-    network = MRF()  # MRF network インスタンス化
+    network = MRF(n_grad)  # MRF network インスタンス化
     network.n_grad = n_grad  # 階調数
+
+    # ### nodeの登録 ### #
     for y in range(height):
         for x in range(width):
             node_id = width * y + x  # 横方向にidを振る
@@ -177,6 +223,34 @@ def generate_mrf_Network(height, width, n_grad):
                         and (x + dx[k] >= 0) and (x + dx[k] < width):
                     neighbor = network.nodes[width * (y + dy[k]) + x + dx[k]]  # networkから近傍ノードを取得
                     node.add_neighbor(neighbor)  # 各ノードに近傍ノードを登録
+
+    # ### edgeの登録 ### #
+    # (height-1)*(width-1)の範囲のedgeの登録
+    for y in range(height - 1):
+        for x in range(width - 1):
+            id = y * width + x
+            pair_id_1 = np.array([id, id + 1], dtype='int32')  # 右のノードとのedge
+            pair_id_2 = np.array([id, id + width], dtype='int32')  # 下のノードとのedge
+            edge_1 = Edge(pair_id_1, n_grad)  # edgeインスタンスの作成
+            edge_2 = Edge(pair_id_2, n_grad)  # edgeインスタンスの作成
+
+            # edgeインスタンスをMRFインスタンスに保存
+            network.edges.append(edge_1)
+            network.edges.append(edge_2)
+
+    # 一番下の行の登録
+    for x in range(width - 1):
+        id = width * (height - 1) + x
+        pair_id = np.array([id, id + 1], dtype='int32')  # 右のノードとのedge
+        edge = Edge(pair_id, n_grad)  # edgeインスタンスの作成
+        network.edges.append(edge)  # edgeインスタンスをMRFインスタンスに保存
+
+    # 一番右の列の登録
+    for y in range(height - 1):
+        id = height * (width - 1) + y
+        pair_id = np.array([id, id + width], dtype='int32')  # 下のノードとのedge
+        edge = Edge(pair_id, n_grad)  # edgeインスタンスの作成
+        network.edges.append(edge)  # edgeインスタンスをMRFインスタンスに保存
 
     return network
 
