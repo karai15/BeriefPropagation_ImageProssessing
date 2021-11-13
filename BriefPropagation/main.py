@@ -31,29 +31,11 @@ image_noise, noise_mat = noise_add_sym(n_grad, q_error, image_in)
 # MRF networkの作成
 network = generate_mrf_network(height, width, n_grad)
 
-# # 尤度の計算
-# # 各ノードの観測確率モデル(尤度 p(g_i|f_i) g_i:観測, f_i:潜在変数)を計算
-# for y in range(height):
-#     for x in range(width):
-#         node_id = width * y + x
-#         node = network.nodes[node_id]  # ノードの取り出し
-#         node.calc_likelihood(beta, q_error, image_noise[y, x], option_likelihood)  # K次元対称通信路の尤度計算
-
-###########################
-# # debug
-# likelihood_mat = np.zeros((n_grad, height * width))
-# for node in network.nodes.values():
-#     likelihood = node.receive_message[node]
-#     likelihood_mat[:, node.id] = likelihood[:]
-# test = 1
-###########################
-
 # BP実行
 # network.belief_propagation(N_itr, alpha)
-network.belief_propagation(N_itr, alpha, beta, q_error, image_noise, option_likelihood)
+alpha_new, beta_new, q_error_new = network.belief_propagation(N_itr, alpha, beta, q_error, image_noise, option_likelihood)
 
-
-# 周辺分布から画像化
+# 周辺事後分布から画像化
 image_out = np.zeros((width, height), dtype='uint8')  # 出力画像
 
 for y in range(height):

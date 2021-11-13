@@ -36,44 +36,105 @@ class MRF:
         # 画像情報取得
         height = image_noise.shape[0]
         width = image_noise.shape[1]
+        n_edge = width * (height - 1) + (width - 1) * height  # 画像全体のエッジ数
 
         # 各ノードのメッセージ初期化
         for node in self.nodes.values():
             node.initialize_message()
 
         # ### EM loop start ### #
+        N_itr_em = 10
+        for itr_em in range(N_itr_em):
 
-        # 尤度の計算
-        # 各ノードの観測確率モデル(尤度 p(g_i|f_i) g_i:観測, f_i:潜在変数)を計算
-        for y in range(height):
-            for x in range(width):
-                node_id = width * y + x
-                node = self.nodes[node_id]  # ノードの取り出し
-                node.calc_likelihood(beta, q_error, image_noise[y, x], option_likelihood)
+            # 尤度の計算
+            # 各ノードの観測確率モデル(尤度 p(g_i|f_i) g_i:観測, f_i:潜在変数)を計算
+            for y in range(height):
+                for x in range(width):
+                    node_id = width * y + x
+                    node = self.nodes[node_id]  # ノードの取り出し
+                    node.calc_likelihood(beta, q_error, image_noise[y, x], option_likelihood)
 
-        # BPイタレーション開始
-        for itr in range(N_itr):
-            print("BP iteration: ", itr)  # イタレーションの出力
+            # BPイタレーション開始
+            for itr_bp in range(N_itr):
+                print("EM iteration:", itr_em, " BP iteration:", itr_bp)  # イタレーションの出力
 
-            # 各ノードが近傍ノードに対してメッセージを送信 (同期スケジューリング)
+                # 各ノードが近傍ノードに対してメッセージを送信 (同期スケジューリング)
+                for node in self.nodes.values():
+                    for neighbor_target in node.neighbor_set:
+                        # nodeからneighbor_targetへの送信メッセージをneighborの受信メッセージとして保存
+                        neighbor_target.receive_message[node] = node.send_message(neighbor_target, alpha)
+
+            # 各ノードの周辺事後分布を計算 p(f_i|g_all)
             for node in self.nodes.values():
-                for neighbor_target in node.neighbor_set:
-                    # nodeからneighbor_targetへの送信メッセージをneighborの受信メッセージとして保存
-                    neighbor_target.receive_message[node] = node.send_message(neighbor_target, alpha)
+                node.calc_post_marginal()
 
-        # 各ノードの周辺事後分布を計算 p(f_i|g_all)
-        for node in self.nodes.values():
-            node.calc_post_marginal()
+            # ノード間の結合事後分布を計算 p(f_i,f_j|g_all) (edge.post_joint_probに保存)
+            self.calc_post_joint(alpha)
 
-        # ノード間の結合事後分布を計算 p(f_i,f_j|g_all)
-        self.calc_post_joint(alpha)
-
-        # # パラメータの更新
-        # qの推定
-        # betaの推定
-        # alphaの推定
+            # # パラメータの更新
+            # qの推定
+            q_error = self.estimate_q_error(image_noise)
+            # betaの推定
+            # beta = self.estimate_beta()
+            # alphaの推定
+            alpha = self.estimate_alpha(n_edge)
+        # ### EM loop end ### #
 
         test = 1
+
+        return alpha, beta, q_error
+
+    # q_errorの計算
+    def estimate_q_error(self, image_noise):
+        """
+        潜在変数が異なる1つの画素へ誤る確率q_errorを推定
+            p(g|f) = q*(1-δ(g-f)) + (1-(n_grad-1)*q)*δ(g-f)  # g:観測(n_grad状態), f:潜在(n_grad状態)
+        :param image_noise: ノイズが加わった観測画像
+        :return: q_error: 推定パラメータ
+        """
+
+        # 画像情報
+        height = image_noise.shape[0]
+        width = image_noise.shape[1]
+
+        param_tmp = 0  # 更新パラメータq_error計算用の変数
+        for y in range(height):
+            for x in range(width):
+                node = self.nodes[y * width + x]
+                observed = image_noise[y, x]
+                post_marginal_prob = node.post_marginal_prob  # 周辺事後確率の取得
+
+                # 観測画素observedと異なる潜在変数をとる事後確率の和を計算 (事後分布での誤り率の和)
+                post_marginal_prob[observed] = 0
+                param_tmp += np.sum(post_marginal_prob)
+
+        q_error = param_tmp / ((self.n_grad - 1) * image_noise.size)  # 平均化してパラメータを更新
+
+        return q_error
+
+    # alphaの推定
+    def estimate_alpha(self, n_edge):
+        """
+        潜在変数間の結合を表す係数alphaの計算
+            alpha: 近傍のノードとの結合度を表す変数 f_ij = exp[ - alpha/2 * (x_i-x_j)^2]
+        :param n_edge: 画像全体のエッジ数
+        :return: alpha: 推定したパラメータ
+        """
+        # expの中身の関数形(ガウス型) (f_i - f_j)^2 の計算
+        Phy_ij = np.zeros((self.n_grad, self.n_grad), dtype='float64')
+        for k in range(self.n_grad):
+            for l in range(self.n_grad):
+                Phy_ij[k, l] = (k - l) ** 2  # expの中身の関数形(ガウス型) (f_i - f_j)^2
+
+        # パラメータalphaの計算
+        param_tmp = 0  # 更新パラメータalpha計算用の変数
+        for edge in self.edges:  # すべてのedgeに対して実行
+            post_joint_prob = edge.post_joint_prob  # 結合事後確率を取り出す
+            param_tmp += np.sum(Phy_ij * post_joint_prob)  # 期待値計算(Phy_ijに結合事後分布で重み付けして足し合わせる)
+
+        alpha = n_edge * (1 / param_tmp)  # エッジ数で平均化してパラメータを更新
+
+        return alpha
 
     # 結合事後分布 p(f_i,f_j|f_all) の計算
     def calc_post_joint(self, alpha):
