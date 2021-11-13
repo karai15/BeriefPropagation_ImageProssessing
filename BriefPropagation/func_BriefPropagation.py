@@ -40,7 +40,7 @@ class MRF:
 
         # 各ノードの周辺分布を計算
         for node in self.nodes.values():
-            node.marginal()
+            node.calc_post_marginal()
 
 
 # Node作成
@@ -50,7 +50,7 @@ class Node:
         self.n_grad = n_grad  # 画素の階調数
         self.neighbor_set = []  # 近傍ノードをもつリスト (観測ノードは含まない)
         self.receive_message = {}  # 近傍ノードから受信したメッセージを保存する辞書 (階調数ベクトルのメッセージが保存される) (観測ノードからの尤度も含む)
-        self.prob_marginal = np.zeros(4)  # nodeの周辺事後分布
+        self.post_marginal_prob = np.zeros(n_grad)  # nodeの周辺事後分布
 
     # 近傍ノードの追加
     def add_neighbor(self, node):
@@ -128,7 +128,10 @@ class Node:
 
         return message
 
-    def marginal(self):
+    def calc_post_marginal(self):
+        """
+        周辺事後分布 p(f_i|g_i)を計算して self.post_marginal_prob に保存
+        """
         prob_tmp = np.ones(self.n_grad)  # 周辺分布の初期値
 
         # 近傍ノードからのメッセージの積から周辺分布を計算
@@ -136,8 +139,8 @@ class Node:
             prob_tmp *= rcv_msg  # メッセージの積
             prob = 1 / np.sum(prob_tmp) * prob_tmp  # 規格化
 
-        # 周辺分布をnodeのメンバに登録
-        self.prob_marginal = prob
+        # 周辺事後分布をnodeのメンバに登録
+        self.post_marginal_prob = prob
 
 
 # MRF作成

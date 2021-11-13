@@ -53,10 +53,10 @@ image_out = np.zeros((width, height), dtype='uint8')  # 出力画像
 for y in range(height):
     for x in range(width):
         node = network.nodes[y * width + x]  # nodeインスタンス
-        prob = node.prob_marginal  # 周辺事後分布
+        post_marginal_prob = node.post_marginal_prob  # 周辺事後分布p(f|g)
 
         # 出力画像の保存
-        image_out[y, x] = np.argmax(prob)  # 事後確率が最大となる値を出力画像として保存
+        image_out[y, x] = np.argmax(post_marginal_prob)  # 事後確率が最大となる値を出力画像として保存
 
 #################
 # plot
