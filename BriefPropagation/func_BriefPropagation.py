@@ -1,4 +1,5 @@
 import numpy as np
+import sys
 
 
 class Edge:
@@ -25,13 +26,13 @@ class MRF:
     """
 
     # 確率伝搬BPを実行
-    def belief_propagation(self, N_itr_BP, N_itr_EM, alpha, beta, q_error, image_noise, theshold_EM, option_model):
+    def belief_propagation(self, N_itr_BP, N_itr_EM, alpha, beta, q_error, image_noise, threshold_EM, option_model):
         """
         確率伝搬BPを実行 (動機スケジューリング)
         :param N_itr_BP: BPイタレーション
         :param N_itr_EM: EMイタレーション
         :param alpha: 潜在変数間の結合係数
-        :param theshold_EM: EMアルゴリズム終了条件用の閾値 (パラメータの変化率)
+        :param threshold_EM: EMアルゴリズム終了条件用の閾値 (パラメータの変化率)
         :param option_model: モデル選択オプション "sym":n_grad次元対称通信路(誤り率(n_grad-1)*q), "gaussian":ガウス分布(精度beta)
         :return: メッセージの更新を行い、各ノードインスタンスにメッセージと周辺事後分布
         """
@@ -58,8 +59,7 @@ class MRF:
             # 各ノードの観測確率モデル(尤度 p(g_i|f_i) g_i:観測, f_i:潜在変数)を計算
             for y in range(height):
                 for x in range(width):
-                    node_id = width * y + x
-                    node = self.nodes[node_id]  # ノードの取り出し
+                    node = self.nodes[width * y + x]  # ノードの取り出し
                     node.calc_likelihood(beta, q_error, image_noise[y, x], option_model)
 
             # BPイタレーション開始
@@ -87,10 +87,15 @@ class MRF:
                 beta_new = self.estimate_beta(image_noise)  # betaの更新
                 q_error_new = q_error  # qは更新なし
             # alphaの推定
-            alpha_new = self.estimate_alpha(n_edge, height, width)
+            alpha_new = self.estimate_alpha(height, width)
+
+            # 更新無し (debug)
+            # alpha_new = alpha
+            # beta_new = beta
+            # q_error_new = q_error
 
             # EMアルゴリズム終了条件
-            if (np.abs(alpha - alpha_new) + np.abs(beta - beta_new) + np.abs(q_error - q_error_new)) < theshold_EM:
+            if (np.abs(alpha - alpha_new) + np.abs(beta - beta_new) + np.abs(q_error - q_error_new)) < threshold_EM:
                 # パラメータ更新
                 alpha = alpha_new
                 beta = beta_new
@@ -103,8 +108,6 @@ class MRF:
             q_error = q_error_new
 
         # ### EM loop end ### #
-
-        test = 1
 
         return alpha, beta, q_error
 
@@ -136,11 +139,10 @@ class MRF:
         return q_error
 
     # alphaの推定
-    def estimate_alpha(self, n_edge, height, width):
+    def estimate_alpha(self, height, width):
         """
         潜在変数間の結合を表す係数alphaの計算
             alpha: 近傍のノードとの結合度を表す変数 f_ij = exp[ - alpha/2 * (x_i-x_j)^2]
-        :param n_edge: 画像全体のエッジ数
         :param height: 画像縦サイズ
         :param width: 画像横サイズ
         :return: alpha: 推定したパラメータ
@@ -184,7 +186,7 @@ class MRF:
                 post_marginal_prob = node.post_marginal_prob  # 周辺事後分布 (n_grad次元のベクトル)
                 param_tmp += np.dot((var_latent - var_observed) ** 2, post_marginal_prob)  # 期待値計算(事後分布の重み付き平均化)
 
-        beta_new = param_tmp / image_noise.size  # 更新パラメータ (ノード数で割る)
+        beta_new = height * width * (1 / param_tmp)  # 更新パラメータ
 
         return beta_new
 
@@ -263,8 +265,8 @@ class Node:
         :return: likelihood: 尤度関数 (n_grad次元ベクトル)
         """
         var_observed = observed * np.ones(self.n_grad)  # 観測画素 (階調数の長さに拡張)
-        var_latent = np.linspace(0, self.n_grad - 1, self.n_grad)  # 潜在変数の候補 (0~階調数までの長さのベクトルを用意)
-        likelihood = np.exp(-beta / 2 * (var_observed - var_latent) ** 2)
+        var_latent = np.linspace(0, self.n_grad - 1, self.n_grad)  # 潜在変数の候補 (0~階調数-1までの長さのベクトルを用意)
+        likelihood = np.sqrt(beta) / np.sqrt(2 * np.pi) * np.exp(-beta / 2 * (var_observed - var_latent) ** 2)
         return likelihood
 
     # 各ノードの(K次元対称通信路)観測確率モデル(尤度 p(g_i|f_i) g_i:観測, f_i:潜在変数)を計算
@@ -409,6 +411,43 @@ def gaussian_inter_latent_function(alpha, n_grad):
             F_ij[k, l] = np.exp(-alpha / 2 * (x_ij_vec[k] - x_ij_vec[l]) ** 2)  # 第iノードと第jノードの結合を表す関数
 
     return F_ij
+
+
+def noise_add_gaussian(n_grad, beta, image_in):
+    """
+    ガウスノイズ: 入力画像image_inに対してノイズを加えてimage_outとして出力
+        # p(g|f) = c * exp[-beta/2 * (g - f)^2]  # g:観測(K状態), f:潜在(K状態)
+    :param n_grad: 状態数 (画素の階調数)
+    :param beta: ノイズ精度
+    :param iamge_in: 入力画像
+    :return:image_out: 出力画像
+            noise_mat: ノイズ行列 (画像サイズ)
+    """
+    # 画像情報
+    height = image_in.shape[0]
+    width = image_in.shape[1]
+
+    image_out = np.zeros((height, width), dtype="uint8")  # 出力画像
+    noise_mat = np.zeros((height, width), dtype="uint8")  # ノイズ単体の画像
+    for y in range(height):
+        for x in range(width):
+            # i.i.d.ガウスノイズの生成
+            noise = np.random.normal(
+                loc=0,  # 平均
+                scale=np.sqrt(1 / beta),  # 標準偏差
+                size=1,  # 出力配列のサイズ
+            )
+            out = image_in[y, x] + noise  # 出力値
+
+            if out > (n_grad - 1):
+                out = n_grad - 1
+            elif out < 0:
+                out = 0
+
+            image_out[y, x] = np.round(out)
+            noise_mat[y, x] = np.round(np.abs(noise))  # ノイズの保存(debug用)
+
+    return image_out, noise_mat
 
 
 # 対称通信路をK次元に拡張したノイズモデル
