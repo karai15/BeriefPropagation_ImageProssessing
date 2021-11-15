@@ -25,11 +25,14 @@ class MRF:
     """
 
     # 確率伝搬BPを実行
-    def belief_propagation(self, N_itr, alpha, beta, q_error, image_noise, option_likelihood):
+    def belief_propagation(self, N_itr_BP, N_itr_EM, alpha, beta, q_error, image_noise, theshold_EM, option_model):
         """
         確率伝搬BPを実行 (動機スケジューリング)
-        :param N_itr: BPイタレーション
+        :param N_itr_BP: BPイタレーション
+        :param N_itr_EM: EMイタレーション
         :param alpha: 潜在変数間の結合係数
+        :param theshold_EM: EMアルゴリズム終了条件用の閾値 (パラメータの変化率)
+        :param option_model: モデル選択オプション "sym":n_grad次元対称通信路(誤り率(n_grad-1)*q), "gaussian":ガウス分布(精度beta)
         :return: メッセージの更新を行い、各ノードインスタンスにメッセージと周辺事後分布
         """
 
@@ -43,8 +46,13 @@ class MRF:
             node.initialize_message()
 
         # ### EM loop start ### #
-        N_itr_em = 10
-        for itr_em in range(N_itr_em):
+        for itr_em in range(N_itr_EM):
+
+            # ログ表示 (更新パラメータ)
+            print("itr_em:", itr_em + 1,
+                  ", alpha:", np.round(alpha, decimals=3),
+                  ", q_error:", np.round(q_error, decimals=3),
+                  ", beta", np.round(beta, decimals=3))
 
             # 尤度の計算
             # 各ノードの観測確率モデル(尤度 p(g_i|f_i) g_i:観測, f_i:潜在変数)を計算
@@ -52,11 +60,11 @@ class MRF:
                 for x in range(width):
                     node_id = width * y + x
                     node = self.nodes[node_id]  # ノードの取り出し
-                    node.calc_likelihood(beta, q_error, image_noise[y, x], option_likelihood)
+                    node.calc_likelihood(beta, q_error, image_noise[y, x], option_model)
 
             # BPイタレーション開始
-            for itr_bp in range(N_itr):
-                print("EM iteration:", itr_em, " BP iteration:", itr_bp)  # イタレーションの出力
+            for itr_bp in range(N_itr_BP):
+                # print("EM iteration:", itr_em, " BP iteration:", itr_bp)  # イタレーションの出力
 
                 # 各ノードが近傍ノードに対してメッセージを送信 (同期スケジューリング)
                 for node in self.nodes.values():
@@ -71,13 +79,29 @@ class MRF:
             # ノード間の結合事後分布を計算 p(f_i,f_j|g_all) (edge.post_joint_probに保存)
             self.calc_post_joint(alpha)
 
-            # # パラメータの更新
-            # qの推定
-            q_error = self.estimate_q_error(image_noise)
-            # betaの推定
-            # beta = self.estimate_beta()
+            # ### パラメータの更新 ### #
+            if option_model == "sym":  # qの推定 (K次元対称通信路)
+                q_error_new = self.estimate_q_error(image_noise)  # qの更新
+                beta_new = beta  # betaは更新なし
+            elif option_model == "gaussian":  # betaの推定 (ガウスノイズ)
+                beta_new = self.estimate_beta(image_noise)  # betaの更新
+                q_error_new = q_error  # qは更新なし
             # alphaの推定
-            alpha = self.estimate_alpha(n_edge)
+            alpha_new = self.estimate_alpha(n_edge, height, width)
+
+            # EMアルゴリズム終了条件
+            if (np.abs(alpha - alpha_new) + np.abs(beta - beta_new) + np.abs(q_error - q_error_new)) < theshold_EM:
+                # パラメータ更新
+                alpha = alpha_new
+                beta = beta_new
+                q_error = q_error_new
+                break
+
+            # パラメータ更新
+            alpha = alpha_new
+            beta = beta_new
+            q_error = q_error_new
+
         # ### EM loop end ### #
 
         test = 1
@@ -92,7 +116,6 @@ class MRF:
         :param image_noise: ノイズが加わった観測画像
         :return: q_error: 推定パラメータ
         """
-
         # 画像情報
         height = image_noise.shape[0]
         width = image_noise.shape[1]
@@ -102,7 +125,7 @@ class MRF:
             for x in range(width):
                 node = self.nodes[y * width + x]
                 observed = image_noise[y, x]
-                post_marginal_prob = node.post_marginal_prob  # 周辺事後確率の取得
+                post_marginal_prob = np.copy(node.post_marginal_prob)  # 周辺事後確率の取得
 
                 # 観測画素observedと異なる潜在変数をとる事後確率の和を計算 (事後分布での誤り率の和)
                 post_marginal_prob[observed] = 0
@@ -113,11 +136,13 @@ class MRF:
         return q_error
 
     # alphaの推定
-    def estimate_alpha(self, n_edge):
+    def estimate_alpha(self, n_edge, height, width):
         """
         潜在変数間の結合を表す係数alphaの計算
             alpha: 近傍のノードとの結合度を表す変数 f_ij = exp[ - alpha/2 * (x_i-x_j)^2]
         :param n_edge: 画像全体のエッジ数
+        :param height: 画像縦サイズ
+        :param width: 画像横サイズ
         :return: alpha: 推定したパラメータ
         """
         # expの中身の関数形(ガウス型) (f_i - f_j)^2 の計算
@@ -132,9 +157,36 @@ class MRF:
             post_joint_prob = edge.post_joint_prob  # 結合事後確率を取り出す
             param_tmp += np.sum(Phy_ij * post_joint_prob)  # 期待値計算(Phy_ijに結合事後分布で重み付けして足し合わせる)
 
-        alpha = n_edge * (1 / param_tmp)  # エッジ数で平均化してパラメータを更新
+        # alpha = n_edge * (1 / (2*param_tmp))  # エッジ数で平均化してパラメータを更新
+        alpha = height * width * (1 / param_tmp)  # エッジ数で平均化してパラメータを更新
 
         return alpha
+
+    # betaの推定
+    def estimate_beta(self, image_noise):
+        """
+        観測ノイズの精度の推定  p(g_i|f_i) = c * exp[(g_i - f_i)^2]
+        :param beta: ノイズ精度(分散の逆数)
+        :param image_noise: ノイズが加わった観測画像
+        :return: beta: 推定したパラメータ
+        """
+        # 画像情報
+        height = image_noise.shape[0]
+        width = image_noise.shape[1]
+
+        param_tmp = 0  # 更新パラメータalpha計算用の変数
+        var_latent = np.linspace(0, self.n_grad - 1, self.n_grad)  # 潜在変数の候補 (0~階調数までの長さのベクトルを用意)
+        for y in range(height):
+            for x in range(width):
+                node = self.nodes[y * width + x]
+                observed = image_noise[y, x]  # 観測画素
+                var_observed = observed * np.ones(self.n_grad, dtype="float64")  # 観測変数ベクトル(n_grad次元)
+                post_marginal_prob = node.post_marginal_prob  # 周辺事後分布 (n_grad次元のベクトル)
+                param_tmp += np.dot((var_latent - var_observed) ** 2, post_marginal_prob)  # 期待値計算(事後分布の重み付き平均化)
+
+        beta_new = param_tmp / image_noise.size  # 更新パラメータ (ノード数で割る)
+
+        return beta_new
 
     # 結合事後分布 p(f_i,f_j|f_all) の計算
     def calc_post_joint(self, alpha):
@@ -185,19 +237,19 @@ class Node:
     def add_neighbor(self, node):
         self.neighbor_set.append(node)
 
-    def calc_likelihood(self, beta, q_error, observed, option_likelihood):
+    def calc_likelihood(self, beta, q_error, observed, option_model):
         """
         各ノードの観測確率モデル(尤度 p(g_i|f_i) g_i:観測, f_i:潜在変数)を計算し, receive_message[self]に登録
         :param beta: beta: ノイズ精度(分散の逆数)
         :param q_error: 潜在画素が異なる1つの画素へ遷移する確率
         :param observed: 観測画素:
-        :param option_likelihood: 尤度のモデルを選択
+        :param option_model: 尤度のモデルを選択
         """
 
         # 尤度のモデル選択
-        if option_likelihood == "sym":
+        if option_model == "sym":
             likelihood = self.sym_likelihood(q_error, observed)
-        elif option_likelihood == "gaussian":
+        elif option_model == "gaussian":
             likelihood = self.gaussian_likelihood(beta, observed)
 
         self.receive_message[self] = likelihood  # 自分自身のノードのメッセージに尤度を登録
