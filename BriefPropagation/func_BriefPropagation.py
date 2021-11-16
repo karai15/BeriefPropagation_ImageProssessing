@@ -40,7 +40,6 @@ class MRF:
         # 画像情報取得
         height = image_noise.shape[0]
         width = image_noise.shape[1]
-        n_edge = width * (height - 1) + (width - 1) * height  # 画像全体のエッジ数
 
         # 各ノードのメッセージ初期化
         for node in self.nodes.values():
@@ -109,7 +108,17 @@ class MRF:
 
         # ### EM loop end ### #
 
-        return alpha, beta, q_error
+        # 周辺事後分布から画像化
+        image_out = np.zeros((width, height), dtype='uint8')  # 出力画像
+        for y in range(height):
+            for x in range(width):
+                node = self.nodes[y * width + x]  # nodeインスタンス
+                post_marginal_prob = node.post_marginal_prob  # 周辺事後分布p(f_i|g_all)
+
+                # 出力画像の保存
+                image_out[y, x] = np.argmax(post_marginal_prob)  # 事後確率が最大となる値を出力画像として保存
+
+        return alpha, beta, q_error, image_out
 
     # q_errorの計算
     def estimate_q_error(self, image_noise):
@@ -501,7 +510,7 @@ def noise_add_sym(K, q_error, image_in):
 # MRFの精度行列の作成
 def calc_mrf_cov_inv_mat(height, width):
     """
-    MRFの精度行列の作成
+    MRFの事前分布の精度行列の作成
         p(x_all) = Π_ij {f_ij} = N(x_all|, 0, Cov)
         f_ij = exp[ - alpha/2 * (x_i-x_j)^2] (精度alphaは1とする)
         (ノードの番号は横向きに振っていく)
@@ -543,3 +552,70 @@ def calc_mrf_cov_inv_mat(height, width):
             Cov_inv_mat[(y * width):((y + 1) * width), ((y - 1) * width):(y * width)] = - np.eye(width)
 
     return Cov_inv_mat
+
+# MRFの事後分布の解析解を出力
+def calc_gaussian_post_prob_analytical(alpha, beta, n_grad, image_noise):
+    """
+    :param alpha: 潜在変数間の結合度を表す変数
+    :param beta: ノイズ精度
+    :param n_grad: 階調数
+    :param image_noise: ノイズが加わった画像
+    :return: image_out: 事後分布の解析解を画像化
+    """
+    # 画像情報取得
+    height, width = image_noise.shape
+
+    # MRFの事前分布の精度行列計算
+    Cov_inv_prior = calc_mrf_cov_inv_mat(height, width)
+    # u, s, vh = np.linalg.svd(Cov_inv_prior)  # 特異値分解(debug用)
+
+    # 画像を行列からベクトルに変換
+    image_vec = image2vec(image_noise)
+
+    # 事後分布の計算
+    Cov_inv_post = alpha * Cov_inv_prior + beta * np.eye(height * width)  # 事後分布の精度行列
+    Cov_post = np.linalg.inv(Cov_inv_post)  # 事後分布の共分散行列
+    mu_post = beta * Cov_post @ image_vec  # 事後分布の平均
+    # u, s, vh = np.linalg.svd(Cov_inv_post)  # 特異値分解(debug用)
+
+    # 事後平均をuint8に変換
+    mu_post_uint = np.round(mu_post)
+    mu_post_uint[mu_post_uint > (n_grad - 1)] = n_grad - 1
+    mu_post_uint[mu_post_uint < 0] = 0
+    mu_post_uint = mu_post_uint.astype('uint8')
+
+    # ベクトルから画像に変換
+    image_out = vec2image(mu_post_uint, height, width)
+
+    return image_out
+
+
+# 画像を行列からベクトルに変換
+def image2vec(image):
+    """
+    画像を行列からベクトルに変換
+    :param image: 入力画像
+    :return: vec: ベクトル化した画像
+    """
+    height, width = image.shape
+    vec = np.zeros(height * width, dtype="float64")
+    for y in range(height):
+        vec[(y * width):((y + 1) * width)] = image[y, :]  # 画像の各行を1列に並べる
+
+    return vec
+
+
+# ベクトルから画像に変換
+def vec2image(vec, height, width):
+    """
+    ベクトルから画像に変換
+    :param vec: 画像を1列に並べたベクトル
+    :param height: 画像縦サイズ
+    :param width: 画像横サイズ
+    :return: image: 出力画像 (height, width)
+    """
+    image = np.zeros((height, width), dtype="uint8")
+    for y in range(height):
+        image[y, :] = vec[(y * width):((y + 1) * width)]  # 画像の各行を1列に並べる
+
+    return image
