@@ -267,6 +267,7 @@ class Node:
         var_observed = observed * np.ones(self.n_grad)  # 観測画素 (階調数の長さに拡張)
         var_latent = np.linspace(0, self.n_grad - 1, self.n_grad)  # 潜在変数の候補 (0~階調数-1までの長さのベクトルを用意)
         likelihood = np.sqrt(beta) / np.sqrt(2 * np.pi) * np.exp(-beta / 2 * (var_observed - var_latent) ** 2)
+
         return likelihood
 
     # 各ノードの(K次元対称通信路)観測確率モデル(尤度 p(g_i|f_i) g_i:観測, f_i:潜在変数)を計算
@@ -495,3 +496,50 @@ def noise_add_sym(K, q_error, image_in):
                     image_out[y, x] = image_in_value + noise
 
     return image_out, noise_mat
+
+
+# MRFの精度行列の作成
+def calc_mrf_cov_inv_mat(height, width):
+    """
+    MRFの精度行列の作成
+        p(x_all) = Π_ij {f_ij} = N(x_all|, 0, Cov)
+        f_ij = exp[ - alpha/2 * (x_i-x_j)^2] (精度alphaは1とする)
+        (ノードの番号は横向きに振っていく)
+    :param height: 画像の縦サイズ
+    :param width: 画像の横サイズ
+    :return: Cov_inv_mat 精度行列 (height*width, height*width)
+    """
+    # 事前分布の精度行列 (共分散行列の逆行列) の作成
+
+    base_diag = np.zeros((width, width), dtype="float64")  # 精度行列計算のためのベースになる行列を作成
+    for k in range(width):
+        if k == 0:
+            base_diag[k, k] = 3
+            base_diag[k, k + 1] = -1
+
+        elif k == width - 1:
+            base_diag[k, k] = 3
+            base_diag[k, k - 1] = -1
+
+        else:
+            base_diag[k, k] = 4
+            base_diag[k, k + 1] = -1
+            base_diag[k, k - 1] = -1
+
+    # 事前分布の精度行列 (共分散行列の逆行列) の作成
+    Cov_inv_mat = np.zeros((height * width, height * width), dtype="float64")
+    for y in range(height):
+        if y == 0:
+            Cov_inv_mat[(y * width):((y + 1) * width), (y * width):((y + 1) * width)] = base_diag[:, :] - np.eye(
+                width)
+            Cov_inv_mat[(y * width):((y + 1) * width), ((y + 1) * width):((y + 2) * width)] = - np.eye(width)
+        elif y == height - 1:
+            Cov_inv_mat[(y * width):((y + 1) * width), (y * width):((y + 1) * width)] = base_diag[:, :] - np.eye(
+                width)
+            Cov_inv_mat[(y * width):((y + 1) * width), ((y - 1) * width):(y * width)] = - np.eye(width)
+        else:
+            Cov_inv_mat[(y * width):((y + 1) * width), (y * width):((y + 1) * width)] = base_diag[:, :]
+            Cov_inv_mat[(y * width):((y + 1) * width), ((y + 1) * width):((y + 2) * width)] = - np.eye(width)
+            Cov_inv_mat[(y * width):((y + 1) * width), ((y - 1) * width):(y * width)] = - np.eye(width)
+
+    return Cov_inv_mat
