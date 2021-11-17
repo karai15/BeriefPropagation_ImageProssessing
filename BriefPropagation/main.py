@@ -6,11 +6,11 @@ from src.BriefPropagation.func_GaussianBayseInference import *
 
 # ######### main ########## #
 # 画像の読み込み
-image_origin = cv2.imread("./image_folder/Mandrill_8bit_32x32.png", 0)  # Lena, Mandrill 256, 64, 32, 16
+image_origin = cv2.imread("./image_folder/Mandrill_8bit_16x16.png", 0)  # Lena, Mandrill 256, 64, 32, 16
 height, width = image_origin.shape  # height:y方向, width：x方向
 
 # 量子化のスケールダウン（2bitに変換）（2bitの場合 {0,1,2,3}の4階調）
-n_bit = 8
+n_bit = 2
 n_grad = 2 ** n_bit  # 階調数
 image_in = (image_origin * ((2 ** n_bit - 1) / np.max(image_origin))).astype('uint8')
 
@@ -22,32 +22,36 @@ beta_true = 1 / sigma_noise ** 2  # 観測ノイズの精度(真値)
 beta = 0.01  # 観測ノイズの精度(EM初期値)
 alpha = 0.01  # 潜在変数間の結合
 
-N_itr_BP = 1  # BPイタレーション回数
-N_itr_EM = 100  # EMイタレーション回数
+N_itr_BP = 2  # BPイタレーション回数
+N_itr_EM = 2  # EMイタレーション回数
 threshold_EM = 1e-2  # EMアルゴリズム終了条件用の閾値 (パラメータの変化率)
+
+# option
+option_noise_model = "sym"
 option_model = "sym"  # "sym":n_grad次元対称通信路(誤り率(n_grad-1)*q), "gaussian":ガウス分布(精度beta)
 
 # 画像にノイズを加える
-# if option_model == "sym":
-#     image_noise, noise_mat = noise_add_sym(n_grad, q_error_true, image_in)
-# elif option_model == "gaussian":
-#     image_noise, noise_mat = noise_add_gaussian(n_grad, beta_true, image_in)
-
-image_noise, noise_mat = noise_add_gaussian(n_grad, beta_true, image_in)
+if option_noise_model == "sym":
+    image_noise, noise_mat = noise_add_sym(n_grad, q_error_true, image_in)
+elif option_noise_model == "gaussian":
+    image_noise, noise_mat = noise_add_gaussian(n_grad, beta_true, image_in)
 
 # MRF networkの作成
 network = generate_mrf_network(height, width, n_grad)
 
 # Belief Propagation (BP)
-# alpha_new, beta_new, q_error_new, image_out_bp = \
-#     network.belief_propagation(N_itr_BP, N_itr_EM, alpha, beta, q_error,
-#                                image_noise, threshold_EM, option_model)
-image_out_bp = image_noise  # debug
+print("\n##################################################")
+print("Start BP")
+alpha_new, beta_new, q_error_new, image_out_bp = \
+    network.belief_propagation(N_itr_BP, N_itr_EM, alpha, beta, q_error,
+                               image_noise, threshold_EM, option_model)
+print("##################################################")
 
-# ベイズ推論(BPを利用せずに一発で解析解を求める)
-print("\n", "###### Start Bayseian Inference in Gaussian Model ######")
+# ベイズ推論(BPを利用せずに解析解を求める)
+print("\n##################################################")
+print("Start Bayseian Inference in Gaussian Model")
 image_out_anl = calc_gaussian_post_prob_analytical(alpha, beta, n_grad, image_noise, N_itr_EM, threshold_EM)
-print("####################### end ###########################")
+print("##################################################")
 
 #################
 # ログ出力
