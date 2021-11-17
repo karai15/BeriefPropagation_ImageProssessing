@@ -4,27 +4,27 @@ import matplotlib.pyplot as plt
 from src.BriefPropagation.func_BriefPropagation import *
 from src.BriefPropagation.func_GaussianBayseInference import *
 
-
 # ######### main ########## #
 # 画像の読み込み
-image_origin = cv2.imread("./image_folder/Lena_8bit_16x16.jpg", 0)  # 256, 64, 32, 16
+image_origin = cv2.imread("./image_folder/Mandrill_8bit_32x32.png", 0)  # Lena, Mandrill 256, 64, 32, 16
 height, width = image_origin.shape  # height:y方向, width：x方向
 
-# 量子化のスケールダウン（2bitに変換）（{0,1,2,3}の4階調）
-n_bit = 2
+# 量子化のスケールダウン（2bitに変換）（2bitの場合 {0,1,2,3}の4階調）
+n_bit = 8
 n_grad = 2 ** n_bit  # 階調数
 image_in = (image_origin * ((2 ** n_bit - 1) / np.max(image_origin))).astype('uint8')
 
 # パラメータ
 q_error_true = 0.05 / (n_grad - 1)  # 元画素が異なる一つの画素へ遷移する確率 (真値)
 q_error = 0.1  # n_grad次元の対称通信路ノイズモデルでの, 元画素が異なる一つの画素へ遷移する確率 (誤り率は(1-n_grad)*q_error)
-beta_true = 10  # 観測ノイズの精度(真値)
-beta = 0.1  # 観測ノイズの精度(EM初期値)
-alpha = 0.1  # 潜在変数間の結合
+sigma_noise = (n_grad - 1) / 12  # ノイズの標準偏差
+beta_true = 1 / sigma_noise ** 2  # 観測ノイズの精度(真値)
+beta = 0.01  # 観測ノイズの精度(EM初期値)
+alpha = 0.01  # 潜在変数間の結合
 
 N_itr_BP = 1  # BPイタレーション回数
-N_itr_EM = 10  # EMイタレーション回数
-threshold_EM = 1e-3  # EMアルゴリズム終了条件用の閾値 (パラメータの変化率)
+N_itr_EM = 100  # EMイタレーション回数
+threshold_EM = 1e-2  # EMアルゴリズム終了条件用の閾値 (パラメータの変化率)
 option_model = "sym"  # "sym":n_grad次元対称通信路(誤り率(n_grad-1)*q), "gaussian":ガウス分布(精度beta)
 
 # 画像にノイズを加える
@@ -35,7 +35,6 @@ option_model = "sym"  # "sym":n_grad次元対称通信路(誤り率(n_grad-1)*q)
 
 image_noise, noise_mat = noise_add_gaussian(n_grad, beta_true, image_in)
 
-
 # MRF networkの作成
 network = generate_mrf_network(height, width, n_grad)
 
@@ -43,14 +42,12 @@ network = generate_mrf_network(height, width, n_grad)
 # alpha_new, beta_new, q_error_new, image_out_bp = \
 #     network.belief_propagation(N_itr_BP, N_itr_EM, alpha, beta, q_error,
 #                                image_noise, threshold_EM, option_model)
-
-image_out_bp = image_noise
+image_out_bp = image_noise  # debug
 
 # ベイズ推論(BPを利用せずに一発で解析解を求める)
 print("\n", "###### Start Bayseian Inference in Gaussian Model ######")
 image_out_anl = calc_gaussian_post_prob_analytical(alpha, beta, n_grad, image_noise, N_itr_EM, threshold_EM)
 print("####################### end ###########################")
-
 
 #################
 # ログ出力
@@ -59,15 +56,15 @@ print("####################### end ###########################")
 # print("q_error_true", np.round(q_error_true, decimals=3), ", q_error_new", np.round(q_error_new, decimals=3),
 #       ', q_error_0', np.round(q_error, decimals=3))
 
-noise_abs = np.sum(np.abs(noise_mat))
+print("\n beta_true", np.round(beta_true, decimals=5))
+
+noise_abs = np.sum(np.abs(image_noise.astype('float64') - image_in.astype('float64')))
 bp_error = np.sum(np.abs(image_out_bp.astype('float64') - image_in.astype('float64')))
 anl_error = np.sum(np.abs(image_out_anl.astype('float64') - image_in.astype('float64')))
 
 print("\n", "noise_abs", noise_abs)
 print("bp_error", bp_error)
 print("anl_error", anl_error)
-
-
 
 # あとでSNR測定
 #################

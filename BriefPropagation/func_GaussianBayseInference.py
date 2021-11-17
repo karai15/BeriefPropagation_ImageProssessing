@@ -1,6 +1,4 @@
 import numpy as np
-import sys
-
 
 # MRFの事後分布の解析解を出力
 def calc_gaussian_post_prob_analytical(alpha, beta, n_grad, image_noise, N_itr_EM, threshold_EM):
@@ -13,6 +11,7 @@ def calc_gaussian_post_prob_analytical(alpha, beta, n_grad, image_noise, N_itr_E
     :param threshold_EM: EMアルゴリズム閾値
     :return: image_out: 事後分布の解析解を画像化
     """
+
     # 画像情報取得
     height, width = image_noise.shape
     # edgeの組み合わせを取得
@@ -27,8 +26,8 @@ def calc_gaussian_post_prob_analytical(alpha, beta, n_grad, image_noise, N_itr_E
     for itr_em in range(N_itr_EM):
         # ログ表示 (更新パラメータ)
         print("itr_em:", itr_em + 1,
-              ", alpha:", np.round(alpha, decimals=3),
-              ", beta", np.round(beta, decimals=3))
+              ", alpha:", np.round(alpha, decimals=5),
+              ", beta", np.round(beta, decimals=5))
 
         # 事後分布の計算
         Cov_inv_post = alpha * Cov_inv_prior + beta * np.eye(height * width)  # 事後分布の精度行列
@@ -37,11 +36,12 @@ def calc_gaussian_post_prob_analytical(alpha, beta, n_grad, image_noise, N_itr_E
         # u, s, vh = np.linalg.svd(Cov_inv_post)  # 特異値分解(debug用)
 
         # パラメータ推定
-        alpha_new = estimate_alpha_gussian_analytical(edge_list, Cov_post, mu_post)
-        beta_new = estimate_beta_gussian_analytical(Cov_post, mu_post, image_noise)
+        alpha_new = estimate_alpha_gaussian_analytical(edge_list, Cov_post, mu_post)
+        # alpha_new = alpha
+        beta_new = estimate_beta_gaussian_analytical(Cov_post, mu_post, image_vec)
 
         # EMアルゴリズム終了条件
-        if np.abs(alpha_new - alpha) + np.abs(beta_new - beta) < threshold_EM:
+        if np.abs((alpha_new - alpha)/alpha) + np.abs((beta_new - beta)/beta) < threshold_EM:
             break
 
         # パラメータ更新
@@ -109,7 +109,7 @@ def calc_mrf_cov_inv_mat(height, width):
 
 
 # 潜在変数間の結合を表す係数alphaの計算
-def estimate_alpha_gussian_analytical(edge_list, Cov_post, mu_post):
+def estimate_alpha_gaussian_analytical(edge_list, Cov_post, mu_post):
     """
     潜在変数間の結合を表す係数alphaの計算
         alpha: 近傍のノードとの結合度を表す変数 f_ij = exp[ - alpha/2 * (x_i-x_j)^2]
@@ -129,22 +129,19 @@ def estimate_alpha_gussian_analytical(edge_list, Cov_post, mu_post):
     return alpha_new
 
 
-def estimate_beta_gussian_analytical(Cov_post, mu_post, image_noise):
+def estimate_beta_gaussian_analytical(Cov_post, mu_post, image_vec):
     """
     観測ノイズの精度の推定  p(g_i|f_i) = c * exp[-beta/2 * (g_i - f_i)^2]
     :return: Cov_post: 事後分布の平均 (画像サイズ)
     :return: mu_post: 事後分布の共分散 (画像サイズ)
-    :return: image_noise: 観測画像
+    :return: image_vec: 観測画像
     """
-    height, width = image_noise.shape
     param_tmp = 0
-    for y in range(height):
-        for x in range(width):
-            i = y * width + x  # 画素番号
-            obs = image_noise[y, x]  # 観測画素
+    for i in range(image_vec.size):
+            obs = image_vec[i]  # 観測画素
             param_tmp += obs ** 2 - 2 * obs * mu_post[i] + Cov_post[i, i] + mu_post[i] ** 2
 
-    beta_new = (height * width) / param_tmp  # 更新パラメータ
+    beta_new = (image_vec.size) / param_tmp  # 更新パラメータ
 
     return beta_new
 
