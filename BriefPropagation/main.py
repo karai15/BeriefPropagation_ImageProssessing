@@ -37,11 +37,11 @@ q_error_true = 0.05 / (n_grad - 1)  # 元画素が異なる一つの画素へ遷
 q_error = 0.1  # n_grad次元の対称通信路ノイズモデルでの, 元画素が異なる一つの画素へ遷移する確率 (誤り率は(1-n_grad)*q_error)
 sigma_noise = (n_grad - 1) / 12  # ノイズの標準偏差
 beta_true = 1 / sigma_noise ** 2  # 観測ノイズの精度(真値)
-beta = 0.01  # 観測ノイズの精度(EM初期値)
-alpha = 0.01  # 潜在変数間の結合
+beta = beta_true  # 観測ノイズの精度(EM初期値)
+alpha = 0.1  # 潜在変数間の結合
 
-N_itr_BP = 2  # BPイタレーション回数
-N_itr_EM = 2  # EMイタレーション回数
+N_itr_BP = 1  # BPイタレーション回数
+N_itr_EM = 1  # EMイタレーション回数
 threshold_EM = 1e-2  # EMアルゴリズム終了条件用の閾値 (パラメータの変化率)
 
 # option
@@ -60,7 +60,7 @@ network = generate_mrf_network(height, width, n_grad)
 # Belief Propagation (BP)
 print("\n##################################################")
 print("Start BP")
-alpha_new, beta_new, q_error_new, image_out_bp = \
+alpha_new, beta_new, q_error_new, image_out_bp, image_out_gabp = \
     network.belief_propagation(N_itr_BP, N_itr_EM, alpha, beta, q_error,
                                image_noise, threshold_EM, option_model)
 print("##################################################")
@@ -78,14 +78,16 @@ print("##################################################")
 # print("q_error_true", np.round(q_error_true, decimals=3), ", q_error_new", np.round(q_error_new, decimals=3),
 #       ', q_error_0', np.round(q_error, decimals=3))
 
-print("\n beta_true", np.round(beta_true, decimals=5))
+print("\nbeta_true", np.round(beta_true, decimals=5))
 
 noise_abs = np.sum(np.abs(image_noise.astype('float64') - image_in.astype('float64')))
 bp_error = np.sum(np.abs(image_out_bp.astype('float64') - image_in.astype('float64')))
+gabp_error = np.sum(np.abs(image_out_gabp.astype('float64') - image_in.astype('float64')))
 anl_error = np.sum(np.abs(image_out_anl.astype('float64') - image_in.astype('float64')))
 
-print("\n", "noise_abs", noise_abs)
+print("\nnoise_abs", noise_abs)
 print("bp_error", bp_error)
+print("gabp_error", gabp_error)
 print("anl_error", anl_error)
 
 # あとでSNR測定
@@ -93,33 +95,40 @@ print("anl_error", anl_error)
 
 #################
 # plot
+# ### 元画像
 # 加工前
 plt.figure()
+plt.subplot(1, 3, 1)
 plt.gray()
 plt.imshow(image_origin)
-
 # ノイズ
-plt.figure()
+plt.subplot(1, 3, 2)
+plt.gray()
+plt.imshow(image_in)
+plt.title("image_in")
+# 量子化後
+plt.subplot(1, 3, 3)
 plt.gray()
 plt.imshow(noise_mat)
 plt.title("noise_mat")
 
-# 量子化後
+# ### 手法比較
+# ノイズ入力後
 plt.figure()
 plt.subplot(2, 2, 1)
 plt.gray()
-plt.imshow(image_in)
-plt.title("image_in")
-# ノイズ入力後
-plt.subplot(2, 2, 2)
-plt.gray()
 plt.imshow(image_noise)
 plt.title("image_noise")
-# BP
-plt.subplot(2, 2, 3)
+# 離散BP
+plt.subplot(2, 2, 2)
 plt.gray()
 plt.imshow(image_out_bp)
 plt.title("image_out(BP)")
+# ガウスBP
+plt.subplot(2, 2, 3)
+plt.gray()
+plt.imshow(image_out_gabp)
+plt.title("image_out(Analytical)")
 # 解析解
 plt.subplot(2, 2, 4)
 plt.gray()

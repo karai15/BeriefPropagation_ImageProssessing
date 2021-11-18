@@ -29,12 +29,14 @@ class MRF:
     def belief_propagation(self, N_itr_BP, N_itr_EM, alpha, beta, q_error, image_noise, threshold_EM, option_model):
         """
         確率伝搬BPを実行 (動機スケジューリング)
+            # メッセージの更新を行い、各ノードインスタンスにメッセージと周辺事後分布を保存
         :param N_itr_BP: BPイタレーション
         :param N_itr_EM: EMイタレーション
         :param alpha: 潜在変数間の結合係数
         :param threshold_EM: EMアルゴリズム終了条件用の閾値 (パラメータの変化率)
         :param option_model: モデル選択オプション "sym":n_grad次元対称通信路(誤り率(n_grad-1)*q), "gaussian":ガウス分布(精度beta)
-        :return: メッセージの更新を行い、各ノードインスタンスにメッセージと周辺事後分布
+        :return: image_out_bp: (離散BP) 出力画像
+                image_out_gabp: (ガウスBP) 出力画像
         """
 
         # 画像情報取得
@@ -114,16 +116,18 @@ class MRF:
         # ### EM loop end ### #
 
         # 周辺事後分布から画像化
-        image_out = np.zeros((width, height), dtype='uint8')  # 出力画像
+        image_out_bp = np.zeros((width, height), dtype='uint8')  # 出力画像 (離散BP)
+        image_out_gabp = np.zeros((width, height), dtype='uint8')  # 出力画像 (ガウスBP)
         for y in range(height):
             for x in range(width):
                 node = self.nodes[y * width + x]  # nodeインスタンス
-                post_marginal_prob = node.post_marginal_prob  # 周辺事後分布p(f_i|g_all)
-
+                post_marginal_prob = node.post_marginal_prob  # (離散BP) 周辺事後分布p(f_i|g_all)
+                post_marginal_prob_gauss = node.post_marginal_prob_gauss  # (ガウスBP) 周辺事後分布の[精度:λ, 平均:μ]
                 # 出力画像の保存
-                image_out[y, x] = np.argmax(post_marginal_prob)  # 事後確率が最大となる値を出力画像として保存
+                image_out_bp[y, x] = np.argmax(post_marginal_prob)  # (離散BP) 事後確率が最大となる値を出力画像として保存
+                image_out_gabp[y, x] = np.round(post_marginal_prob_gauss[1])  # (ガウスBP) 事後分布の平均値(ガウスなので=最大値)
 
-        return alpha, beta, q_error, image_out
+        return alpha, beta, q_error, image_out_bp, image_out_gabp
 
     # q_errorの計算
     def estimate_q_error(self, image_noise):
@@ -246,9 +250,10 @@ class Node:
         self.id = node_id
         self.n_grad = n_grad  # 画素の階調数
         self.neighbor_set = []  # 近傍ノードをもつリスト (観測ノードは含まない)
-        self.receive_message = {}  # 近傍ノードから受信したメッセージを保存する辞書 (階調数ベクトルのメッセージが保存される) (観測ノードからの尤度も含む)
-        self.receive_message_gauss = {}  # (ガウスBP用)近傍ノードから受信したメッセージを保存する辞書 {[λ:精度, μ:平均], ...} (観測ノードからの尤度は含まない)
-        self.post_marginal_prob = np.zeros(n_grad)  # nodeの周辺事後分布
+        self.receive_message = {}  # (離散BP)近傍ノードから受信したメッセージを保存する辞書 (階調数ベクトルのメッセージが保存される) (観測ノードからの尤度も含む)
+        self.receive_message_gauss = {}  # (ガウスBP)近傍ノードから受信したメッセージを保存する辞書 {[λ:精度, μ:平均], ...} (観測ノードからの尤度は含まない)
+        self.post_marginal_prob = np.zeros(n_grad)  # (離散BP) nodeの周辺事後分布
+        self.post_marginal_prob_gauss = np.zeros(2)  # (ガウスBP) nodeの周辺事後分布の[精度:λ, 平均:μ]
 
     # 近傍ノードの追加
     def add_neighbor(self, node):
@@ -359,10 +364,12 @@ class Node:
             lambda_sum += lambda_neighbor
             lambda_mu_sum += lambda_neighbor * mu_neighbor
 
+        # 事後分布の計算
         lambda_post = beta + lambda_sum  # 事後分布の精度
         mu_post = (beta*observed + lambda_mu_sum) / (beta + lambda_sum)  # 事後分布の平均
 
-        return np.array([lambda_post, mu_post], dtype="float64")
+        # 周辺事後分布をnodeのメンバに登録
+        self.post_marginal_prob_gauss = np.array([lambda_post, mu_post], dtype="float64")
 
 
 # MRF作成
