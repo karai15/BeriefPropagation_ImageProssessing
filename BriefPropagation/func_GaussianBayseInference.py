@@ -181,9 +181,6 @@ def create_edge_list(height, width):
     return edge_list
 
 
-# alphaの推定
-
-
 # 画像を行列からベクトルに変換
 def image2vec(image):
     """

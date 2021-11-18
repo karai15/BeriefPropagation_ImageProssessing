@@ -4,6 +4,24 @@ import matplotlib.pyplot as plt
 from src.BriefPropagation.func_BriefPropagation import *
 from src.BriefPropagation.func_GaussianBayseInference import *
 
+##############
+# id = 30
+# height = 16
+# width = 16
+# ###
+#
+# _id = id + 1  # 1から数えたindex
+# if _id % width == 0:
+#     y = np.int(_id / width)
+#     x = width
+# else:
+#     y = np.int(_id / width) + 1
+#     x = _id % width
+#
+# zzz = np.array([y, x], dtype="int32") - 1
+# test = 0
+#############
+
 # ######### main ########## #
 # 画像の読み込み
 image_origin = cv2.imread("./image_folder/Mandrill_8bit_16x16.png", 0)  # Lena, Mandrill 256, 64, 32, 16

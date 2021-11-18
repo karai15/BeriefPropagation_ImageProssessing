@@ -43,7 +43,8 @@ class MRF:
 
         # 各ノードのメッセージ初期化
         for node in self.nodes.values():
-            node.initialize_message()
+            node.initialize_message()  # 離散BP
+            node.initialize_message_gauss()  # ガウスBP
 
         # ### EM loop start ### #
         for itr_em in range(N_itr_EM):
@@ -59,24 +60,26 @@ class MRF:
             for y in range(height):
                 for x in range(width):
                     node = self.nodes[width * y + x]  # ノードの取り出し
-                    node.calc_likelihood(beta, q_error, image_noise[y, x])
+                    node.calc_likelihood(beta, q_error, image_noise[y, x])  # 離散BP (ガウスBPは必要なし)
 
             # BPイタレーション開始
             for itr_bp in range(N_itr_BP):
                 # print("EM iteration:", itr_em, " BP iteration:", itr_bp)  # イタレーションの出力
-
-                # 各ノードが近傍ノードに対してメッセージを送信 (同期スケジューリング)
+                # 各ノードが近傍ノードに対してメッセージを送信 (同期スケジューリング) 周囲4方向のメッセージを更新
                 for node in self.nodes.values():
-                    for neighbor_target in node.neighbor_set:
-                        # nodeからneighbor_targetへの送信メッセージをneighborの受信メッセージとして保存
+                    y, x = id2xy(height, width, node.id)  # idから(x, y)に変換
+                    observed = image_noise[y, x]  # nodeに対応する観測画素
+                    for neighbor_target in node.neighbor_set:  # nodeからneighbor_targetへの送信メッセージをneighborの受信メッセージとして保存
+                        # 離散BP
                         neighbor_target.receive_message[node] = node.send_message(neighbor_target, alpha)
-
-                        # ガウスBP (ガウス型メッセージのλ(精度)とμ(平均)を送信)
-
+                        # ガウスBP (ガウス型メッセージのλ(精度)とμ(平均)を送信) targetへのメッセージ [λ(精度), μ(平均)]
+                        neighbor_target.receive_message_gauss[node] = node.send_message_gauss(neighbor_target, observed, alpha, beta)
 
             # 各ノードの周辺事後分布を計算 p(f_i|g_all)
             for node in self.nodes.values():
-                node.calc_post_marginal()
+                y, x = id2xy(height, width, node.id)  # idから(x, y)に変換
+                node.calc_post_marginal()  # 離散BP
+                node.calc_post_marginal_gauss(alpha, beta, image_noise[y, x])  # ガウスBP
 
             # ノード間の結合事後分布を計算 p(f_i,f_j|g_all) (edge.post_joint_probに保存)
             self.calc_post_joint(alpha)
@@ -85,7 +88,7 @@ class MRF:
             q_error_new = self.estimate_q_error(image_noise)  # qの更新
             # beta_new = self.estimate_beta(image_noise)  # betaの更新
             beta_new = 0
-            alpha_new = self.estimate_alpha(height, width) # alphaの更新
+            alpha_new = self.estimate_alpha(height, width)  # alphaの更新
 
             # 更新無し (debug)
             # alpha_new = alpha
@@ -244,7 +247,7 @@ class Node:
         self.n_grad = n_grad  # 画素の階調数
         self.neighbor_set = []  # 近傍ノードをもつリスト (観測ノードは含まない)
         self.receive_message = {}  # 近傍ノードから受信したメッセージを保存する辞書 (階調数ベクトルのメッセージが保存される) (観測ノードからの尤度も含む)
-        self.receive_message_gauss = {}  # (ガウスBP用)近傍ノードから受信したメッセージを保存する辞書 {[λ:精度, μ:平均], ...}
+        self.receive_message_gauss = {}  # (ガウスBP用)近傍ノードから受信したメッセージを保存する辞書 {[λ:精度, μ:平均], ...} (観測ノードからの尤度は含まない)
         self.post_marginal_prob = np.zeros(n_grad)  # nodeの周辺事後分布
 
     # 近傍ノードの追加
@@ -267,18 +270,21 @@ class Node:
         likelihood[observed] = 1 - (self.n_grad - 1) * q_error  # 潜在変数が観測と一致する場合の確率の計算
         self.receive_message[self] = likelihood  # 自分自身のノードのメッセージに尤度を登録
 
-    # メッセージの初期化
+    # メッセージの初期化 (離散BP)
     def initialize_message(self):
         for neighbor_node in self.neighbor_set:
             self.receive_message[neighbor_node] = np.ones(self.n_grad)  # (離散)メッセージを1で初期化
-            self.receive_message_gauss[neighbor_node] = np.array([1e-6, 0.0])  # (ガウス)メッセージを初期化 [λ:精度, μ:平均]
 
+    # メッセージの初期化
+    def initialize_message_gauss(self):
+        for neighbor_node in self.neighbor_set:
+            self.receive_message_gauss[neighbor_node] = np.array([0.0, 0.0])  # (ガウス)メッセージを初期化 [λ:精度, μ:平均]
 
     # node から neigbor_target への送信メッセージを作成
     def send_message(self, neighbor_target, alpha):
         """
-        # node から neigbor_target への送信メッセージを作成
-        :param neighbor_target: メッセージ送信先のノnodeインスタンス
+        node から neigbor_target への送信メッセージを作成
+        :param neighbor_target: メッセージ送信先のnodeインスタンス
         :param alpha: 近傍のノードとの結合度を表す変数 f_ij = exp[ - alpha/2 * (x_i-x_j)^2]
         :return: message: node から neigbor_target への送信メッセージ (階調数次元のベクトル)
         """
@@ -296,6 +302,32 @@ class Node:
 
         return message
 
+    # GaBPのメッセージ送信 [λ:精度, μ:平均]
+    def send_message_gauss(self, neighbor_target, observed, alpha, beta):
+        """
+        node から neigbor_target への送信メッセージを作成
+        :param neighbor_target: メッセージ送信先のnodeインスタンス
+        :param observed: 観測画素
+        :param alpha: 近傍のノードとの結合度を表す変数 f_ij = exp[ - alpha/2 * (x_i - x_j)^2]
+        :param beta: ノイズ精度 f_i = exp[ - beta/2 * (x_i - g_i)^2] (g_i;観測変数)
+        :return: message: node から neigbor_target への送信メッセージ [λ:精度, μ:平均]
+        """
+        lambda_sum = 0  # 近傍ノードからのλの和
+        lambda_mu_sum = 0  # 近傍ノードからのλμの和
+        for neighbor_node in self.receive_message_gauss.keys():  # target以外のすべての近傍ノードを走査 (観測ノードreceive_message[self]は含まれる)
+            if neighbor_target != neighbor_node:  # target以外の近傍ノードからnodeに対してのメッセージをすべてけ合わせる(観測ノードも含む)
+                rcv_msg = self.receive_message[neighbor_node]  # 近傍ノードからの受信メッセージを取得
+                lambda_sum += rcv_msg[0]
+                lambda_mu_sum += rcv_msg[0] * rcv_msg[1]
+
+        # ターゲットへのメッセージ M(x_tr) = c * exp[-λ_tr/2 * (x_tr - μ_tr)^2]
+        lambda_taget = (alpha * (beta + lambda_sum)) / (alpha + beta + lambda_sum)  # λ_trの計算
+        mu_target = (beta * observed + lambda_mu_sum) / (beta + lambda_sum)  # μ_trの計算
+        message = np.array([lambda_taget, mu_target])
+
+        return message
+
+    # 離散BPの周辺事後分布の計算
     def calc_post_marginal(self):
         """
         周辺事後分布 p(f_i|g_i)を計算して self.post_marginal_prob に保存
@@ -309,6 +341,28 @@ class Node:
 
         # 周辺事後分布をnodeのメンバに登録
         self.post_marginal_prob = prob
+
+    # ガウスBPの周辺事後分布の計算
+    def calc_post_marginal_gauss(self, alpha, beta, observed):
+        """
+        周辺事後分布の精度λと平均μの計算
+        :param alpha:
+        :param beta:
+        :param observed:
+        :return:　[lambda_post, mu_post] = [事後精度:λ, 事後平均:μ]
+        """
+        lambda_sum = 0  # 近傍ノードからの精度λの和
+        lambda_mu_sum = 0  # 近傍ノードからのλμの和 (μ:平均)
+        for rcv_msg in self.receive_message_gauss.values():
+            lambda_neighbor = rcv_msg[0]  # 近接ノードからのメッセージの精度
+            mu_neighbor = rcv_msg[0]  # 近接ノードからのメッセージの平均
+            lambda_sum += lambda_neighbor
+            lambda_mu_sum += lambda_neighbor * mu_neighbor
+
+        lambda_post = beta + lambda_sum  # 事後分布の精度
+        mu_post = (beta*observed + lambda_mu_sum) / (beta + lambda_sum)  # 事後分布の平均
+
+        return np.array([lambda_post, mu_post], dtype="float64")
 
 
 # MRF作成
@@ -480,3 +534,20 @@ def noise_add_sym(K, q_error, image_in):
                     image_out[y, x] = image_in_value + noise
 
     return image_out, noise_mat
+
+def id2xy(height, width, id):
+    """
+    画像のidから(x, y)座標に変換
+    :param height: 画像縦サイズ
+    :param width: 画像横サイズ
+    :param id: 画素のid (横向きに0~(h*w-1)までのindex)
+    :return: [x, y]
+    """
+    _id = id + 1  # 1から数えたindex
+    if _id % width == 0:
+        y = np.int(_id / width)
+        x = width
+    else:
+        y = np.int(_id / width) + 1
+        x = _id % width
+    return np.array([y, x], dtype="int32") - 1
