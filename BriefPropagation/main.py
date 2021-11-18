@@ -37,16 +37,16 @@ q_error_true = 0.05 / (n_grad - 1)  # 元画素が異なる一つの画素へ遷
 q_error = 0.1  # n_grad次元の対称通信路ノイズモデルでの, 元画素が異なる一つの画素へ遷移する確率 (誤り率は(1-n_grad)*q_error)
 sigma_noise = (n_grad - 1) / 12  # ノイズの標準偏差
 beta_true = 1 / sigma_noise ** 2  # 観測ノイズの精度(真値)
-beta = beta_true  # 観測ノイズの精度(EM初期値)
+beta = 0.1  # 観測ノイズの精度(EM初期値)
 alpha = 0.1  # 潜在変数間の結合
 
-N_itr_BP = 1  # BPイタレーション回数
-N_itr_EM = 1  # EMイタレーション回数
+N_itr_BP = 10  # BPイタレーション回数
+N_itr_EM = 10  # EMイタレーション回数
 threshold_EM = 1e-2  # EMアルゴリズム終了条件用の閾値 (パラメータの変化率)
 
 # option
-option_noise_model = "sym"
-option_model = "sym"  # "sym":n_grad次元対称通信路(誤り率(n_grad-1)*q), "gaussian":ガウス分布(精度beta)
+option_noise_model = "gaussian"
+option_model = "gaussian"  # "sym":n_grad次元対称通信路(誤り率(n_grad-1)*q), "gaussian":ガウス分布(精度beta)
 
 # 画像にノイズを加える
 if option_noise_model == "sym":
@@ -60,7 +60,7 @@ network = generate_mrf_network(height, width, n_grad)
 # Belief Propagation (BP)
 print("\n##################################################")
 print("Start BP")
-alpha_new, beta_new, q_error_new, image_out_bp, image_out_gabp = \
+image_out_bp, image_out_gabp = \
     network.belief_propagation(N_itr_BP, N_itr_EM, alpha, beta, q_error,
                                image_noise, threshold_EM, option_model)
 print("##################################################")
