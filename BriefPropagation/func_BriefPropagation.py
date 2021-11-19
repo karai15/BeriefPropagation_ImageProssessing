@@ -26,7 +26,8 @@ class MRF:
     """
 
     # 確率伝搬BPを実行
-    def belief_propagation(self, N_itr_BP, N_itr_EM, alpha, beta, q_error, image_noise, threshold_EM, option_model):
+    def belief_propagation(self, N_itr_BP, N_itr_EM, alpha,
+                           beta, q_error, image_noise, threshold_EM, threshold_BP,option_model):
         """
         確率伝搬BPを実行 (動機スケジューリング)
             # メッセージの更新を行い、各ノードインスタンスにメッセージと周辺事後分布を保存
@@ -34,6 +35,7 @@ class MRF:
         :param N_itr_EM: EMイタレーション
         :param alpha: 潜在変数間の結合係数
         :param threshold_EM: EMアルゴリズム終了条件用の閾値 (パラメータの変化率)
+        :param threshold_BP: BPの終了条件用の閾値 (パラメータの変化率)
         :param option_model: モデル選択オプション "sym":n_grad次元対称通信路(誤り率(n_grad-1)*q), "gaussian":ガウス分布(精度beta)
         :return: image_out_bp: (離散BP) 出力画像
                 image_out_gabp: (ガウスBP) 出力画像
@@ -49,7 +51,6 @@ class MRF:
 
         # 各ノードのメッセージ初期化
         for node in self.nodes.values():
-            # if option_model == "":
             if option_model == "sym+gaussian":  # symとgauss両方実行する場合
                 node.initialize_message()  # 離散BP
                 node.initialize_message_gauss()  # ガウスBP
@@ -64,8 +65,8 @@ class MRF:
             # ログ表示 (更新パラメータ)
             print("itr_em:", itr_em + 1,
                   ", alpha:", np.round(alpha, decimals=5),
-                  ", alpha_gauss:", np.round(alpha_gauss, decimals=5),
                   ", q_error:", np.round(q_error, decimals=5),
+                  ", alpha_gauss:", np.round(alpha_gauss, decimals=5),
                   ", beta_gauss", np.round(beta_gauss, decimals=5))
 
             if option_model == "sym+gaussian" or option_model == "sym":  # "sym"の場合のみ必要
@@ -78,7 +79,11 @@ class MRF:
 
             # BPイタレーション開始
             for itr_bp in range(N_itr_BP):
-                # print("EM iteration:", itr_em, " BP iteration:", itr_bp)  # イタレーションの出力
+
+                # メッセージの変化の和を保存 (BP収束の確認のため)
+                message_diff_sum = np.zeros(self.n_grad, dtype="float64")
+                message_diff_sum_gauss = 0
+
                 # 各ノードが近傍ノードに対してメッセージを送信 (同期スケジューリング) 周囲4方向のメッセージを更新
                 for node in self.nodes.values():
                     y, x = id2xy(height, width, node.id)  # idから(x, y)に変換
@@ -95,6 +100,7 @@ class MRF:
                         elif option_model == "gaussian":
                             neighbor_target.receive_message_gauss[node] = \
                                 node.send_message_gauss(neighbor_target, observed, alpha_gauss, beta_gauss)
+
             # 各ノードの周辺事後分布を計算 p(f_i|g_all)
             for node in self.nodes.values():
                 y, x = id2xy(height, width, node.id)  # idから(x, y)に変換
@@ -127,56 +133,57 @@ class MRF:
                 alpha_new_gauss = self.estimate_alpha_gauss(height, width, alpha_gauss, beta_gauss)
                 beta_new_gauss = self.estimate_beta_gauss(height, width, image_noise)
 
+            # EMアルゴリズム終了条件 EM_end_condition の計算
             if option_model == "sym+gaussian":
+                EM_end_condition = \
+                    np.abs((alpha_new - alpha) / alpha) + np.abs((q_error_new - q_error) / q_error) \
+                    + np.abs((alpha_new_gauss - alpha_gauss) / alpha_gauss) \
+                    + np.abs((beta_new_gauss - beta_gauss) / beta_gauss)
+
+                # パラメータ更新
+                alpha = alpha_new  # 離散BP
+                q_error = q_error_new  # 離散BP
+                alpha_gauss = alpha_new_gauss  # ガウスBP
+                beta_gauss = beta_new_gauss  # ガウスBP
+
             elif option_model == "sym":
+                EM_end_condition = np.abs((alpha_new - alpha) / alpha) + np.abs((q_error_new - q_error) / q_error)
+                # パラメータ更新
+                alpha = alpha_new  # 離散BP
+                q_error = q_error_new  # 離散BP
+
             elif option_model == "gaussian":
+                EM_end_condition = \
+                    np.abs((alpha_new_gauss - alpha_gauss) / alpha_gauss) \
+                    + np.abs((beta_new_gauss - beta_gauss) / beta_gauss)
 
-            ##################################
-            # EMアルゴリズム終了条件 (変化率で切ったほうがよさそう)
-            # if np.abs((alpha_new - alpha) / alpha) + np.abs((beta_new - beta) / beta) < threshold_EM:
-            # if (np.abs(alpha - alpha_new) + np.abs(beta - beta_new) + np.abs(q_error - q_error_new)) < threshold_EM:
-            #     # パラメータ更新
-            #     alpha = alpha_new
-            #     beta = beta_new
-            #     q_error = q_error_new
-            #     break
-            ##################################
+                # パラメータ更新
+                alpha_gauss = alpha_new_gauss  # ガウスBP
+                beta_gauss = beta_new_gauss  # ガウスBP
 
-            # ### パラメータ更新
-            # 離散BP
-            alpha = alpha_new
-            q_error = q_error_new
-            # ガウスBP
-            alpha_gauss = alpha_new_gauss
-            beta_gauss = beta_new_gauss
-
+            # EMアルゴリズム終了
+            if EM_end_condition < threshold_EM:
+                break
         # ### EM loop end ### #
 
         # 周辺事後分布から画像化
         image_out_bp = np.zeros((width, height), dtype='uint8')  # 出力画像 (離散BP)
         image_out_gabp = np.zeros((width, height), dtype='uint8')  # 出力画像 (ガウスBP)
-
-        # debug
-        image_out_gabp_tst = np.zeros((width, height))  # 出力画像 (ガウスBP)
-        image_out_gabp_tst_2 = np.zeros((width, height))  # 出力画像 (ガウスBP)
-
         for y in range(height):
             for x in range(width):
                 node = self.nodes[y * width + x]  # nodeインスタンス
                 post_marginal_prob = node.post_marginal_prob  # (離散BP) 周辺事後分布p(f_i|g_all)
                 post_marginal_prob_gauss = node.post_marginal_prob_gauss  # (ガウスBP) 周辺事後分布の[精度:λ, 平均:μ]
+
+                mu_post = np.round(post_marginal_prob_gauss[1])
+                if mu_post > self.n_grad - 1:  # 上限を超えた場合は上限に抑える
+                    mu_post = self.n_grad - 1
+                if mu_post < 0:  # 下限を下回った場合下限に抑える
+                    mu_post = 0
+
                 # 出力画像の保存
                 image_out_bp[y, x] = np.argmax(post_marginal_prob)  # (離散BP) 事後確率が最大となる値を出力画像として保存
-                image_out_gabp[y, x] = np.round(post_marginal_prob_gauss[1])  # (ガウスBP) 事後分布の平均値(ガウスなので=最大値)
-
-                # debug
-                image_out_gabp_tst[y, x] = post_marginal_prob_gauss[1]  # (ガウスBP) 事後分布の平均値(ガウスなので=最大値)
-                image_out_gabp_tst_2[y, x] = np.floor(post_marginal_prob_gauss[1])
-                # 範囲超えた時の処理
-                # mu_post_uint[mu_post_uint > (n_grad - 1)] = n_grad - 1
-                # mu_post_uint[mu_post_uint < 0] = 0
-
-        test = 1
+                image_out_gabp[y, x] = mu_post  # (ガウスBP) 事後分布の平均値(ガウスなので=最大値)
 
         return image_out_bp, image_out_gabp
 
@@ -443,7 +450,7 @@ class Node:
         lambda_mu_sum = 0  # 近傍ノードからのλμの和
         for neighbor_node in self.receive_message_gauss.keys():  # target以外のすべての近傍ノードを走査 (観測ノードreceive_message[self]は含まれる)
             if neighbor_target != neighbor_node:  # target以外の近傍ノードからnodeに対してのメッセージをすべてけ合わせる(観測ノードも含む)
-                rcv_msg = self.receive_message[neighbor_node]  # 近傍ノードからの受信メッセージを取得
+                rcv_msg = self.receive_message_gauss[neighbor_node]  # 近傍ノードからの受信メッセージを取得
                 lambda_sum += rcv_msg[0]
                 lambda_mu_sum += rcv_msg[0] * rcv_msg[1]
 

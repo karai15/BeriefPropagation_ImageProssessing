@@ -4,31 +4,13 @@ import matplotlib.pyplot as plt
 from src.BriefPropagation.func_BriefPropagation import *
 from src.BriefPropagation.func_GaussianBayseInference import *
 
-##############
-# id = 30
-# height = 16
-# width = 16
-# ###
-#
-# _id = id + 1  # 1から数えたindex
-# if _id % width == 0:
-#     y = np.int(_id / width)
-#     x = width
-# else:
-#     y = np.int(_id / width) + 1
-#     x = _id % width
-#
-# zzz = np.array([y, x], dtype="int32") - 1
-# test = 0
-#############
-
 # ######### main ########## #
 # 画像の読み込み
 image_origin = cv2.imread("./image_folder/Mandrill_8bit_16x16.png", 0)  # Lena, Mandrill 256, 64, 32, 16
 height, width = image_origin.shape  # height:y方向, width：x方向
 
 # 量子化のスケールダウン（2bitに変換）（2bitの場合 {0,1,2,3}の4階調）
-n_bit = 8
+n_bit = 2
 n_grad = 2 ** n_bit  # 階調数
 image_in = (image_origin * ((2 ** n_bit - 1) / np.max(image_origin))).astype('uint8')
 
@@ -37,16 +19,18 @@ q_error_true = 0.05 / (n_grad - 1)  # 元画素が異なる一つの画素へ遷
 q_error = 0.1  # n_grad次元の対称通信路ノイズモデルでの, 元画素が異なる一つの画素へ遷移する確率 (誤り率は(1-n_grad)*q_error)
 sigma_noise = (n_grad - 1) / 12  # ノイズの標準偏差
 beta_true = 1 / sigma_noise ** 2  # 観測ノイズの精度(真値)
-beta = 1  # 観測ノイズの精度(EM初期値)
-alpha = 1  # 潜在変数間の結合
+beta = 0.1  # 観測ノイズの精度(EM初期値)
+alpha = 0.1  # 潜在変数間の結合
 
 N_itr_BP = 10  # BPイタレーション回数
-N_itr_EM = 1  # EMイタレーション回数
+N_itr_EM = 100  # EMイタレーション回数
 threshold_EM = 1e-2  # EMアルゴリズム終了条件用の閾値 (パラメータの変化率)
 
 # option
-option_noise_model = "gaussian"
-option_model = "gaussian"  # "sym":n_grad次元対称通信路(誤り率(n_grad-1)*q), "gaussian":ガウス分布(精度beta)
+# "sym":n_grad次元対称通信路(誤り率(n_grad-1)*q),
+# "gaussian":ガウス分布(精度beta)
+option_noise_model = "gaussian"  # "sym" or "gaussian"
+option_model = "gaussian"  # "sym" or "gaussian" or "sym+gaussian"
 
 # 画像にノイズを加える
 if option_noise_model == "sym":
