@@ -27,7 +27,7 @@ class MRF:
 
     # 確率伝搬BPを実行
     def belief_propagation(self, N_itr_BP, N_itr_EM, alpha,
-                           beta, q_error, image_noise, threshold_EM, threshold_BP,option_model):
+                           beta, q_error, image_noise, threshold_EM, threshold_BP, option_model):
         """
         確率伝搬BPを実行 (動機スケジューリング)
             # メッセージの更新を行い、各ノードインスタンスにメッセージと周辺事後分布を保存
@@ -48,6 +48,7 @@ class MRF:
         # 画像情報取得
         height = image_noise.shape[0]
         width = image_noise.shape[1]
+        n_edge = 2 * (height - 1) * width  # エッジ数
 
         # 各ノードのメッセージ初期化
         for node in self.nodes.values():
@@ -81,8 +82,7 @@ class MRF:
             for itr_bp in range(N_itr_BP):
 
                 # メッセージの変化の和を保存 (BP収束の確認のため)
-                message_diff_sum = np.zeros(self.n_grad, dtype="float64")
-                message_diff_sum_gauss = 0
+                message_diff_sum = 0.0
 
                 # 各ノードが近傍ノードに対してメッセージを送信 (同期スケジューリング) 周囲4方向のメッセージを更新
                 for node in self.nodes.values():
@@ -92,14 +92,39 @@ class MRF:
 
                         # 離散BP and ガウスBP (ガウス型メッセージのλ(精度)とμ(平均)を送信) targetへのメッセージ [λ(精度), μ(平均)]
                         if option_model == "sym+gaussian":
-                            neighbor_target.receive_message[node] = node.send_message(neighbor_target, alpha)
-                            neighbor_target.receive_message_gauss[node] = \
-                                node.send_message_gauss(neighbor_target, observed, alpha_gauss, beta_gauss)
+                            # 離散BP
+                            msg_rcv = node.send_message(neighbor_target, alpha)  # 新メッセージ
+                            message_diff_sum += np.sum(
+                                np.abs(msg_rcv - neighbor_target.receive_message[node]))  # 1メッセージの差分を計算
+                            neighbor_target.receive_message[node] = msg_rcv  # メッセージを更新
+
+                            # ガウスBP
+                            msg_rcv_gauss = node.send_message_gauss(neighbor_target, observed, alpha_gauss,
+                                                                    beta_gauss)  # 新メッセージ
+                            message_diff_sum += np.sum(
+                                np.abs(msg_rcv_gauss - neighbor_target.receive_message_gauss[node]))
+                            neighbor_target.receive_message_gauss[node] = msg_rcv_gauss  # メッセージを更新
+
                         elif option_model == "sym":
-                            neighbor_target.receive_message[node] = node.send_message(neighbor_target, alpha)
+                            # 離散BP
+                            msg_rcv = node.send_message(neighbor_target, alpha)  # 新メッセージ
+                            message_diff_sum += np.sum(
+                                np.abs(msg_rcv - neighbor_target.receive_message[node]))  # 1メッセージの差分を計算
+                            neighbor_target.receive_message[node] = msg_rcv  # メッセージを更新
+
                         elif option_model == "gaussian":
-                            neighbor_target.receive_message_gauss[node] = \
-                                node.send_message_gauss(neighbor_target, observed, alpha_gauss, beta_gauss)
+                            # ガウスBP
+                            msg_rcv_gauss = node.send_message_gauss(neighbor_target, observed, alpha_gauss,
+                                                                    beta_gauss)  # 新メッセージ
+                            message_diff_sum += np.sum(
+                                np.abs(msg_rcv_gauss - neighbor_target.receive_message_gauss[node]))
+                            neighbor_target.receive_message_gauss[node] = msg_rcv_gauss  # メッセージを更新
+
+                # 終了条件の計算
+                # print("diff", message_diff_sum / (n_edge * self.n_grad))
+                if message_diff_sum / (n_edge * self.n_grad) < threshold_BP:
+                    print("BP_break_itration", itr_bp)
+                    break
 
             # 各ノードの周辺事後分布を計算 p(f_i|g_all)
             for node in self.nodes.values():
@@ -163,6 +188,7 @@ class MRF:
 
             # EMアルゴリズム終了
             if EM_end_condition < threshold_EM:
+                print("EM_break_itration", itr_em)
                 break
         # ### EM loop end ### #
 

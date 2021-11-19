@@ -22,15 +22,16 @@ beta_true = 1 / sigma_noise ** 2  # 観測ノイズの精度(真値)
 beta = 0.1  # 観測ノイズの精度(EM初期値)
 alpha = 0.1  # 潜在変数間の結合
 
-N_itr_BP = 10  # BPイタレーション回数
+N_itr_BP = 100  # BPイタレーション回数
 N_itr_EM = 100  # EMイタレーション回数
 threshold_EM = 1e-2  # EMアルゴリズム終了条件用の閾値 (パラメータの変化率)
+threshold_BP = 1e-5  # BP終了条件 (メッセージの変化)
 
 # option
 # "sym":n_grad次元対称通信路(誤り率(n_grad-1)*q),
 # "gaussian":ガウス分布(精度beta)
 option_noise_model = "gaussian"  # "sym" or "gaussian"
-option_model = "gaussian"  # "sym" or "gaussian" or "sym+gaussian"
+option_model = "sym+gaussian"  # "sym" or "gaussian" or "sym+gaussian"
 
 # 画像にノイズを加える
 if option_noise_model == "sym":
@@ -46,7 +47,7 @@ print("\n##################################################")
 print("Start BP")
 image_out_bp, image_out_gabp = \
     network.belief_propagation(N_itr_BP, N_itr_EM, alpha, beta, q_error,
-                               image_noise, threshold_EM, option_model)
+                               image_noise, threshold_EM, threshold_BP, option_model)
 print("##################################################")
 
 # ベイズ推論(BPを利用せずに解析解を求める)
