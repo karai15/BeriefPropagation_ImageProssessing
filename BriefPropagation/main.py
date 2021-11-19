@@ -6,20 +6,20 @@ from src.BriefPropagation.func_GaussianBayseInference import *
 
 # ######### main ########## #
 # 画像の読み込み
-image_origin = cv2.imread("./image_folder/Mandrill_8bit_16x16.png", 0)  # Lena, Mandrill 256, 64, 32, 16
+image_origin = cv2.imread("./image_folder/Mandrill_8bit_32x32.png", 0)  # Lena, Mandrill 256, 64, 32, 16
 height, width = image_origin.shape  # height:y方向, width：x方向
 
 # 量子化のスケールダウン（2bitに変換）（2bitの場合 {0,1,2,3}の4階調）
-n_bit = 2
+n_bit = 4
 n_grad = 2 ** n_bit  # 階調数
 image_in = (image_origin * ((2 ** n_bit - 1) / np.max(image_origin))).astype('uint8')
 
 # パラメータ
 q_error_true = 0.05 / (n_grad - 1)  # 元画素が異なる一つの画素へ遷移する確率 (真値)
 q_error = 0.1  # n_grad次元の対称通信路ノイズモデルでの, 元画素が異なる一つの画素へ遷移する確率 (誤り率は(1-n_grad)*q_error)
-sigma_noise = (n_grad - 1) / 12  # ノイズの標準偏差
+sigma_noise = (n_grad - 1) / 10  # ノイズの標準偏差
 beta_true = 1 / sigma_noise ** 2  # 観測ノイズの精度(真値)
-beta = 0.1  # 観測ノイズの精度(EM初期値)
+beta = beta_true  # 観測ノイズの精度(EM初期値)
 alpha = 0.1  # 潜在変数間の結合
 
 N_itr_BP = 100  # BPイタレーション回数
@@ -31,7 +31,8 @@ threshold_BP = 1e-5  # BP終了条件 (メッセージの変化)
 # "sym":n_grad次元対称通信路(誤り率(n_grad-1)*q),
 # "gaussian":ガウス分布(精度beta)
 option_noise_model = "gaussian"  # "sym" or "gaussian"
-option_model = "sym+gaussian"  # "sym" or "gaussian" or "sym+gaussian"
+option_model = "gaussian"  # "sym" or "gaussian" or "sym+gaussian"
+option_gauss_analytical = "true"  # "true" or "false" (ガウスの解析解を求めるか)
 
 # 画像にノイズを加える
 if option_noise_model == "sym":
@@ -53,29 +54,32 @@ print("##################################################")
 # ベイズ推論(BPを利用せずに解析解を求める)
 print("\n##################################################")
 print("Start Bayseian Inference in Gaussian Model")
-image_out_anl = calc_gaussian_post_prob_analytical(alpha, beta, n_grad, image_noise, N_itr_EM, threshold_EM)
+if option_gauss_analytical == "true":  # ガウスの解析解
+    image_out_anl = calc_gaussian_post_prob_analytical(alpha, beta, n_grad, image_noise, N_itr_EM, threshold_EM)
+elif option_gauss_analytical == "false":  # ガウスの解析解無し
+    image_out_anl = np.zeros(image_noise.shape, 'uint8')
 print("##################################################")
 
 #################
 # ログ出力
-# print("\n", "alpha", np.round(alpha, decimals=3), ", alpha_new", np.round(alpha_new, decimals=3))
-# print("beta", np.round(beta, decimals=3), ", beta_new", np.round(beta_new, decimals=3))
-# print("q_error_true", np.round(q_error_true, decimals=3), ", q_error_new", np.round(q_error_new, decimals=3),
-#       ', q_error_0', np.round(q_error, decimals=3))
-
-print("\nbeta_true", np.round(beta_true, decimals=5))
-
 noise_abs = np.sum(np.abs(image_noise.astype('float64') - image_in.astype('float64')))
 bp_error = np.sum(np.abs(image_out_bp.astype('float64') - image_in.astype('float64')))
 gabp_error = np.sum(np.abs(image_out_gabp.astype('float64') - image_in.astype('float64')))
 anl_error = np.sum(np.abs(image_out_anl.astype('float64') - image_in.astype('float64')))
 
-print("\nnoise_abs", noise_abs)
-print("bp_error", bp_error)
-print("gabp_error", gabp_error)
-print("anl_error", anl_error)
+test_mat = image_noise - image_out_gabp
+test_max = np.max(test_mat)
+test_min = np.min(test_mat)
+test_sum = np.sum(test_mat)
 
-# あとでSNR測定
+
+print("\nnoise_error", noise_abs)
+print("sym_bp_error", bp_error)
+print("ga_bp_error", gabp_error)
+print("ga_anlytical_error", anl_error)
+
+print("\nbeta_true", np.round(beta_true, decimals=5))
+print("q_error_true", np.round(q_error_true, decimals=5))
 #################
 
 #################
@@ -108,17 +112,17 @@ plt.title("image_noise")
 plt.subplot(2, 2, 2)
 plt.gray()
 plt.imshow(image_out_bp)
-plt.title("image_out(BP)")
+plt.title("BP")
 # ガウスBP
 plt.subplot(2, 2, 3)
 plt.gray()
 plt.imshow(image_out_gabp)
-plt.title("image_out(GaBP)")
+plt.title("GaBP")
 # 解析解
 plt.subplot(2, 2, 4)
 plt.gray()
 plt.imshow(image_out_anl)
-plt.title("image_out(Analytical)")
+plt.title("Ga_Analytical")
 
 plt.show()
 #################

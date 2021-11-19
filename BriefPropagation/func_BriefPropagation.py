@@ -63,22 +63,22 @@ class MRF:
         # ### EM loop start ### #
         for itr_em in range(N_itr_EM):
 
-            # ログ表示 (更新パラメータ)
+            # ### ログ表示 (更新パラメータ) ### #
             print("itr_em:", itr_em + 1,
                   ", alpha:", np.round(alpha, decimals=5),
                   ", q_error:", np.round(q_error, decimals=5),
                   ", alpha_gauss:", np.round(alpha_gauss, decimals=5),
                   ", beta_gauss", np.round(beta_gauss, decimals=5))
 
+            # ### 尤度の計算 ### #
             if option_model == "sym+gaussian" or option_model == "sym":  # "sym"の場合のみ必要
-                # 尤度の計算
                 # 各ノードの観測確率モデル(尤度 p(g_i|f_i) g_i:観測, f_i:潜在変数)を計算
                 for y in range(height):
                     for x in range(width):
                         node = self.nodes[width * y + x]  # ノードの取り出し
                         node.calc_likelihood(q_error, image_noise[y, x])  # 離散BP (ガウスBPは必要なし)
 
-            # BPイタレーション開始
+            # ### BPイタレーション開始 ### #
             for itr_bp in range(N_itr_BP):
 
                 # メッセージの変化の和を保存 (BP収束の確認のため)
@@ -126,7 +126,7 @@ class MRF:
                     print("BP_break_itration", itr_bp)
                     break
 
-            # 各ノードの周辺事後分布を計算 p(f_i|g_all)
+            # ### 各ノードの周辺事後分布を計算 p(f_i|g_all) ### #
             for node in self.nodes.values():
                 y, x = id2xy(height, width, node.id)  # idから(x, y)に変換
                 if option_model == "sym+gaussian":
@@ -141,7 +141,7 @@ class MRF:
                 # ノード間の結合事後分布を計算 p(f_i,f_j|g_all) (edge.post_joint_probに保存)
                 self.calc_post_joint(alpha)
 
-            # パラメータの更新
+            # ### パラメータの更新 ### #
             if option_model == "sym+gaussian":
                 # 離散BP
                 q_error_new = self.estimate_q_error(image_noise)  # qの更新
@@ -158,7 +158,7 @@ class MRF:
                 alpha_new_gauss = self.estimate_alpha_gauss(height, width, alpha_gauss, beta_gauss)
                 beta_new_gauss = self.estimate_beta_gauss(height, width, image_noise)
 
-            # EMアルゴリズム終了条件 EM_end_condition の計算
+            # ### EMアルゴリズム終了条件 EM_end_condition の計算 ### #
             if option_model == "sym+gaussian":
                 EM_end_condition = \
                     np.abs((alpha_new - alpha) / alpha) + np.abs((q_error_new - q_error) / q_error) \
@@ -336,7 +336,7 @@ class MRF:
 
             param_tmp += 1 / lambda_1 + mu_1 ** 2 - 2 * (cov_12 + mu_1 * mu_2) + 1 / lambda_2 + mu_2 ** 2
 
-        alpha_new = height * width / param_tmp
+        alpha_new = height * width * (1 / param_tmp)
 
         return alpha_new
 
@@ -356,7 +356,7 @@ class MRF:
                 mu_post = node.post_marginal_prob_gauss[1]  # 周辺事後分布の平均
 
                 param_tmp += 1 / lambda_post + mu_post ** 2 - 2 * observed * mu_post + observed ** 2
-        beta_new = width * height / param_tmp  # 更新パラメータ
+        beta_new = width * height * (1 / param_tmp)  # 更新パラメータ
 
         return beta_new
 
