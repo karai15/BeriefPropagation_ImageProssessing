@@ -28,7 +28,7 @@ image_origin = cv2.imread("./image_folder/Mandrill_8bit_16x16.png", 0)  # Lena, 
 height, width = image_origin.shape  # height:y方向, width：x方向
 
 # 量子化のスケールダウン（2bitに変換）（2bitの場合 {0,1,2,3}の4階調）
-n_bit = 2
+n_bit = 8
 n_grad = 2 ** n_bit  # 階調数
 image_in = (image_origin * ((2 ** n_bit - 1) / np.max(image_origin))).astype('uint8')
 
@@ -37,11 +37,11 @@ q_error_true = 0.05 / (n_grad - 1)  # 元画素が異なる一つの画素へ遷
 q_error = 0.1  # n_grad次元の対称通信路ノイズモデルでの, 元画素が異なる一つの画素へ遷移する確率 (誤り率は(1-n_grad)*q_error)
 sigma_noise = (n_grad - 1) / 12  # ノイズの標準偏差
 beta_true = 1 / sigma_noise ** 2  # 観測ノイズの精度(真値)
-beta = 0.1  # 観測ノイズの精度(EM初期値)
-alpha = 0.1  # 潜在変数間の結合
+beta = 1  # 観測ノイズの精度(EM初期値)
+alpha = 1  # 潜在変数間の結合
 
 N_itr_BP = 10  # BPイタレーション回数
-N_itr_EM = 10  # EMイタレーション回数
+N_itr_EM = 1  # EMイタレーション回数
 threshold_EM = 1e-2  # EMアルゴリズム終了条件用の閾値 (パラメータの変化率)
 
 # option
@@ -128,7 +128,7 @@ plt.title("image_out(BP)")
 plt.subplot(2, 2, 3)
 plt.gray()
 plt.imshow(image_out_gabp)
-plt.title("image_out(Analytical)")
+plt.title("image_out(GaBP)")
 # 解析解
 plt.subplot(2, 2, 4)
 plt.gray()
